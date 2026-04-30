@@ -47,6 +47,8 @@
 
 ### Contracts
 
+- [ai-communication-layer-contract.md](docs/active/contracts/ai-communication-layer-contract.md)
+  - TCP/IP-like AI message layer의 통합 구현 계약
 - [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
   - room/thread/task/message/correlation 관계와 task state machine
 - [artifact-model.md](docs/active/contracts/artifact-model.md)
@@ -78,10 +80,11 @@
 4. Foundation의 `principles`
 5. Foundation의 `market-and-research`
 6. Engineering의 `go-ddd-sonarqube-baseline`
-7. Contracts의 `message-task-state-model`
-8. Contracts의 `artifact-model`
-9. Contracts의 `approval-identity-policy`
-10. Contracts의 `delivery-semantics`
-11. Contracts의 `checkpoint-and-takeover-model`
-12. Product의 `mvp-canonical-scenario`
-13. Governance의 `document-lifecycle`
+7. Contracts의 `ai-communication-layer-contract`
+8. Contracts의 `message-task-state-model`
+9. Contracts의 `artifact-model`
+10. Contracts의 `approval-identity-policy`
+11. Contracts의 `delivery-semantics`
+12. Contracts의 `checkpoint-and-takeover-model`
+13. Product의 `mvp-canonical-scenario`
+14. Governance의 `document-lifecycle`

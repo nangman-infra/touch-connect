@@ -235,6 +235,7 @@ reason은 free text가 아니라 enum으로 관리하는 것을 기본값으로 
 
 ## Related Docs
 
+- [ai-communication-layer-contract.md](docs/active/contracts/ai-communication-layer-contract.md)
 - [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
 - [artifact-model.md](docs/active/contracts/artifact-model.md)
 - [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)

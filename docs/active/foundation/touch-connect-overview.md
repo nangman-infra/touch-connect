@@ -107,6 +107,7 @@
 현재 구현 전 핵심 계약은 아래 문서에서 닫는다.
 
 - [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
+- [ai-communication-layer-contract.md](docs/active/contracts/ai-communication-layer-contract.md)
 - [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
 - [artifact-model.md](docs/active/contracts/artifact-model.md)
 - [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)

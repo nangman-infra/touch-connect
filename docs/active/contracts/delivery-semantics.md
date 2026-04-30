@@ -205,6 +205,7 @@ status는 아래를 기본으로 둔다.
 
 ## Related Docs
 
+- [ai-communication-layer-contract.md](docs/active/contracts/ai-communication-layer-contract.md)
 - [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
 - [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
 - [artifact-model.md](docs/active/contracts/artifact-model.md)

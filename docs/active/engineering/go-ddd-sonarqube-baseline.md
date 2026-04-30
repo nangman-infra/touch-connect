@@ -67,15 +67,19 @@
 
 ## Go package baseline
 
-기본 package 구조는 아래를 따른다.
+루트에는 제품 앱 단위 디렉터리를 둔다.
+각 앱 내부의 기본 package 구조는 아래를 따른다.
 
 ```text
-/cmd/<app>/main.go
-/internal/<bounded-context>/domain
-/internal/<bounded-context>/application
-/internal/<bounded-context>/infrastructure
-/internal/platform/<adapter-kind>
+/<app>/cmd/<binary>/main.go
+/<app>/internal/<bounded-context>/domain
+/<app>/internal/<bounded-context>/application
+/<app>/internal/<bounded-context>/infrastructure
+/<app>/internal/platform/<adapter-kind>
 ```
+
+초기 앱 단위는 `tc-server`, `tc-control`, `tc-worker`, `tcctl`, `admin`으로 둔다.
+`admin`이 Go가 아닌 frontend stack을 선택하면 동일한 원칙을 `src/domain`, `src/application`, `src/adapters` 같은 stack-native 구조로 변환한다.
 
 레이어 의미는 아래와 같다.
 

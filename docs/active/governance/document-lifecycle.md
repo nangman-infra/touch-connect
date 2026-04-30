@@ -1,7 +1,7 @@
 > Document Status: active
 > Document Type: governance-policy
 > Scope: 문서 상태, 우선순위, 전이, 인덱스 관리 규칙
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/governance/document-lifecycle.md`
+> Canonical Path: `docs/active/governance/document-lifecycle.md`
 > Source Of Truth: yes
 > Last Reviewed: 2026-04-26
 
@@ -52,7 +52,7 @@
 > Document Status: active | planned | archived | support
 > Document Type: root-index | active-index | governance-policy | engineering-baseline | contract-model | product-scenario | foundation | research | working-draft | archive-note | state-directory-index | template-asset
 > Scope: 이 문서가 책임지는 범위
-> Canonical Path: 절대 경로
+> Canonical Path: repo-relative 경로
 > Source Of Truth: yes | no
 > Last Reviewed: YYYY-MM-DD
 ```
@@ -60,8 +60,8 @@
 선택 필드:
 
 ```md
-> Supersedes: 문서 경로 또는 `none`
-> Superseded By: 문서 경로 또는 `none`
+> Supersedes: repo-relative docs 경로 또는 `none`
+> Superseded By: repo-relative docs 경로 또는 `none`
 ```
 
 ## 상태 정의

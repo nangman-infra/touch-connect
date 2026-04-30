@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: state-directory-index
 > Scope: planned 디렉터리의 의미와 사용 규칙
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/planned/README.md`
+> Canonical Path: `docs/planned/README.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-26
+> Last Reviewed: 2026-04-30
 
 # Planned Docs
 
@@ -35,7 +35,4 @@
 
 ## 현재 상태
 
-현재 planned 문서는 아래 1개다.
-
-- [checkpoint-and-takeover-model.md](/Volumes/WD/Developments/touch-connect/docs/planned/contracts/checkpoint-and-takeover-model.md)
-  - takeover, claim/lease, raw history, checkpoint, DLQ 관계를 정리한 초안
+현재 planned 문서는 없다.

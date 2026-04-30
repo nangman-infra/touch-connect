@@ -1,7 +1,7 @@
 > Document Status: active
 > Document Type: state-directory-index
 > Scope: archive 디렉터리의 의미와 사용 규칙
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/archive/README.md`
+> Canonical Path: `docs/archive/README.md`
 > Source Of Truth: yes
 > Last Reviewed: 2026-04-26
 

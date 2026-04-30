@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: product-scenario
 > Scope: v1에서 반드시 성공해야 하는 대표 흐름과 완료 조건
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/product/mvp-canonical-scenario.md`
+> Canonical Path: `docs/active/product/mvp-canonical-scenario.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-26
+> Last Reviewed: 2026-04-30
 
 # MVP Canonical Scenario
 
@@ -44,6 +44,10 @@
 - `validation_report`
 - `approval_record`
 
+## 핵심 durable record
+
+- `side_effect_execution_record`
+
 ## 기본 흐름
 
 ### 1. 작업 생성
@@ -80,7 +84,9 @@
 ### 6. Side effect 수행
 
 - approval이 `approved`이고 `approval_hash`가 현재 intent와 일치하면 task를 다시 `working`으로 전이한다.
-- 그다음 protected side effect를 수행한다.
+- protected side effect execution record를 `pending`으로 만든다.
+- `idempotency_key + protected_scope` 중복 검사를 통과한 뒤 protected side effect를 수행한다.
+- 실행 결과를 side effect execution record에 기록한다.
 - 예:
   - PR 생성
   - 외부 tracker 갱신
@@ -101,7 +107,7 @@
 ### SonarQube gate failure
 
 - validation 결과 gate failure가 나오면 task를 `failed`로 전이한다.
-- retry 승인 시 `attempt_no`를 올리고 `working`으로 복귀한다.
+- retry 승인 시 새 `attempt_ref`를 만들고 `attempt_no`를 올린 뒤 `working`으로 복귀한다.
 
 ### Approval rejection
 
@@ -117,7 +123,8 @@ v1의 canonical scenario는 아래를 모두 만족해야 완료다.
 - 최소 2개의 artifact version이 생성된다.
 - `validation_report` artifact 안에 SonarQube quality gate `pass` 결과가 남는다.
 - 최소 1회의 approval decision이 기록되고, canonical success run에서는 그 decision이 `approved`다.
-- approval 이후 protected side effect가 정확히 1회 수행된다.
+- approval 이후 protected side effect execution record가 1개 생성되고 `succeeded` 상태가 된다.
+- 같은 `idempotency_key + protected_scope` 조합으로 외부 side effect가 정확히 1회 수행된다.
 - 실패 또는 clarification 경로 중 최소 1개를 재현 가능하게 지원한다.
 - canonical success run의 최종 task state는 반드시 `completed`다.
 - `failed/canceled`는 별도 negative path에서만 허용된다.
@@ -130,8 +137,9 @@ v1의 canonical scenario는 아래를 모두 만족해야 완료다.
 
 ## Related Docs
 
-- [go-ddd-sonarqube-baseline.md](/Volumes/WD/Developments/touch-connect/docs/active/engineering/go-ddd-sonarqube-baseline.md)
-- [message-task-state-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/message-task-state-model.md)
-- [artifact-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/artifact-model.md)
-- [approval-identity-policy.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/approval-identity-policy.md)
-- [delivery-semantics.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/delivery-semantics.md)
+- [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
+- [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
+- [artifact-model.md](docs/active/contracts/artifact-model.md)
+- [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
+- [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
+- [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)

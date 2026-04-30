@@ -1,7 +1,7 @@
 > Document Status: active
 > Document Type: research
 > Scope: touch-connect 관련 시장, 표준, 논문, 벤치마크 리서치
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/foundation/market-and-research.md`
+> Canonical Path: `docs/active/foundation/market-and-research.md`
 > Source Of Truth: yes
 > Last Reviewed: 2026-04-26
 

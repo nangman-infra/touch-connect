@@ -9,7 +9,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path("/Volumes/WD/Developments/touch-connect")
+ROOT = Path(__file__).resolve().parents[1]
 DOCS_ROOT = ROOT / "docs"
 ACTIVE_ROOT = DOCS_ROOT / "active"
 PLANNED_ROOT = DOCS_ROOT / "planned"
@@ -91,6 +91,17 @@ def is_under(path: Path, parent: Path) -> bool:
         return False
 
 
+def resolve_repo_path(value: str, base_dir: Path | None = None) -> Path:
+    path = Path(strip_wrapping(value))
+    if path.is_absolute():
+        return path
+    if path.parts and path.parts[0] == "docs":
+        return ROOT / path
+    if base_dir is not None:
+        return base_dir / path
+    return ROOT / path
+
+
 def path_kind(path: Path) -> str:
     if path in STRUCTURAL_ACTIVE_EXCEPTIONS:
         return "structural-active"
@@ -124,9 +135,11 @@ def load_active_registry(index_path: Path) -> list[Path]:
     registered = [ACTIVE_INDEX]
     for raw_target in LINK_PATTERN.findall(text):
         target = strip_wrapping(raw_target)
-        if not target.startswith(str(ROOT)):
+        if "://" in target or target.startswith("#"):
             continue
-        registered.append(Path(target))
+        path = resolve_repo_path(target, index_path.parent)
+        if is_under(path, DOCS_ROOT):
+            registered.append(path)
     return registered
 
 
@@ -157,7 +170,7 @@ def validate_document(document: Document, active_registry: set[Path]) -> list[st
         errors.append(f"허용되지 않은 Document Type입니다: {doc_type}")
 
     canonical_path = metadata.get("Canonical Path")
-    if canonical_path and Path(canonical_path) != document.path:
+    if canonical_path and resolve_repo_path(canonical_path) != document.path:
         errors.append(
             f"Canonical Path가 실제 경로와 다릅니다: {canonical_path} != {document.path}"
         )
@@ -184,10 +197,7 @@ def validate_document(document: Document, active_registry: set[Path]) -> list[st
             continue
         if value == "none":
             continue
-        supersession_path = Path(value)
-        if not supersession_path.is_absolute():
-            errors.append(f"{field}는 절대 경로 또는 none 이어야 합니다: {value}")
-            continue
+        supersession_path = resolve_repo_path(value)
         if not is_under(supersession_path, DOCS_ROOT):
             errors.append(f"{field}는 docs 경로를 가리켜야 합니다: {value}")
             continue

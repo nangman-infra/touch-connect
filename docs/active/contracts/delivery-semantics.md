@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: contract-model
-> Scope: ordering, ack, readback, redelivery, dedupe, expiry, supersede 계약
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/contracts/delivery-semantics.md`
+> Scope: ordering, ack, readback, redelivery, dedupe, expiry, supersede, protected side effect 실행 계약
+> Canonical Path: `docs/active/contracts/delivery-semantics.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-26
+> Last Reviewed: 2026-04-30
 
 # Delivery Semantics
 
@@ -110,6 +110,52 @@ dead_letter_policy
 - 같은 `message_id`는 같은 logical message다.
 - 같은 `idempotency_key`와 같은 protected scope 조합은 같은 side effect intent로 본다.
 - duplicate arrival은 history에 남길 수 있지만 side effect는 한 번만 실행해야 한다.
+- protected side effect의 exactly-once 보장은 transport가 아니라 side effect execution ledger로 검증한다.
+- side effect 결과를 알 수 없는 실패는 성공으로 dedupe하면 안 되며 운영자 확인이나 explicit retry 경로로 넘긴다.
+- material change로 `approval_hash`가 바뀌면 protected side effect intent도 바뀐 것이므로 새 `idempotency_key`를 발급해야 한다.
+
+## Protected side effect execution ledger
+
+protected side effect는 실행 전에 durable execution record를 가져야 한다.
+
+최소 필드:
+
+```text
+side_effect_execution_id
+idempotency_key
+protected_scope
+approval_id
+approval_hash
+message_id
+task_id
+attempt_ref
+operation_kind
+external_target
+requested_by_actor_id
+executed_by_actor_id
+status
+started_at
+completed_at
+result_ref
+failure_reason_code
+```
+
+status는 아래를 기본으로 둔다.
+
+- `pending`
+- `executing`
+- `succeeded`
+- `failed`
+- `canceled`
+- `deduped`
+
+규칙:
+
+- 승인 decision record 없이 protected side effect를 실행하면 안 된다.
+- `approval_hash`가 현재 intent와 일치하지 않으면 external call을 시작하지 않는다.
+- `idempotency_key + protected_scope` 조합은 uniqueness boundary다.
+- 같은 uniqueness boundary의 duplicate request는 새 external call을 만들지 않고 기존 execution record를 반환하거나 `deduped` record로 연결한다.
+- execution record 없이 외부 시스템에 side effect가 발생하면 contract violation이다.
 
 ## Late arrival와 supersede
 
@@ -146,20 +192,23 @@ dead_letter_policy
 - readback 의미
 - redelivery rule
 - dedupe와 idempotency rule
+- protected side effect execution ledger
 - expiry와 supersede rule
 
 ## 현재 구현 기본값
 
 - conversational order는 `thread_sequence`만 믿는다.
 - task projection order는 `task_revision`만 믿는다.
-- protected side effect는 `idempotency_key` 없이 실행하지 않는다.
+- protected side effect는 `idempotency_key`와 side effect execution record 없이 실행하지 않는다.
+- protected side effect 실행 여부는 execution ledger로만 판단한다.
 - `approval_request`와 `state_update`는 항상 durable path로 보낸다.
 
 ## Related Docs
 
-- [message-task-state-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/message-task-state-model.md)
-- [approval-identity-policy.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/approval-identity-policy.md)
-- [artifact-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/artifact-model.md)
+- [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
+- [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
+- [artifact-model.md](docs/active/contracts/artifact-model.md)
+- [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)
 
 ## Sources
 

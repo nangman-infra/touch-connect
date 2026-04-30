@@ -1,7 +1,7 @@
 > Document Status: active
 > Document Type: contract-model
 > Scope: artifact identity, versioning, retention, access, lineage 계약
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/contracts/artifact-model.md`
+> Canonical Path: `docs/active/contracts/artifact-model.md`
 > Source Of Truth: yes
 > Last Reviewed: 2026-04-26
 
@@ -186,9 +186,9 @@ artifact lineage는 optional convenience가 아니라 core contract다.
 
 ## Related Docs
 
-- [message-task-state-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/message-task-state-model.md)
-- [approval-identity-policy.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/approval-identity-policy.md)
-- [delivery-semantics.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/delivery-semantics.md)
+- [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
+- [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
+- [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
 
 ## Sources
 

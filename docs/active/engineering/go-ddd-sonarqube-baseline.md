@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: engineering-baseline
 > Scope: Go 구현, DDD 경계, SonarQube 품질 게이트 기준
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/engineering/go-ddd-sonarqube-baseline.md`
+> Canonical Path: `docs/active/engineering/go-ddd-sonarqube-baseline.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-26
+> Last Reviewed: 2026-04-30
 
 # Go DDD SonarQube Baseline
 
@@ -45,6 +45,10 @@
 
 - `messaging`
   - room, thread, message envelope, readback, supersede 처리
+- `endpoints`
+  - endpoint registry, connection state, capability registration
+- `processing`
+  - attempt lifecycle, checkpoint, claim/lease, takeover 처리
 - `tasks`
   - task lifecycle, state projection, retry, task revision
 - `artifacts`
@@ -109,6 +113,8 @@
 - `Artifact`
 - `ApprovalRequest`
 - `Actor` 또는 `RoleAssignment`
+- `Endpoint`
+- `Attempt`
 
 `Message`는 append-only record 성격이 강하므로 `messaging` context 안에서 별도 aggregate 또는 event log record로 취급한다.
 

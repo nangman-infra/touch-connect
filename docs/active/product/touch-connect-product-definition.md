@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: foundation
 > Scope: touch-connect의 최종 제품 정의, 핵심 객체, 책임 경계, v1 제품 철학
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/product/touch-connect-product-definition.md`
+> Canonical Path: `docs/active/product/touch-connect-product-definition.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-27
+> Last Reviewed: 2026-04-30
 > Supersedes: `none`
 > Superseded By: `none`
 
@@ -199,6 +199,8 @@ ref는 사람이 읽기 쉬운 URI 형태로 보이되, 내부적으로는 안�
 
 - retry나 reassignment가 발생하면 새 attempt가 생긴다
 - message는 유지되고 attempt만 바뀐다
+- `attempt_ref`는 실행 단위의 stable identity다
+- `attempt_no`는 task 안에서 retry 순서를 보여주는 projection 값이다
 
 ### checkpoint
 
@@ -263,13 +265,20 @@ v1 message 최소 계약은 아래다.
 
 ```text
 message_ref
+room_ref
+thread_ref
 sender_endpoint_ref
 target_capability
+delivery_class
+readback_required
 payload.summary
 payload.body
 payload.references[]
 constraints[]
+artifact_version_refs[]
 correlation_ref (optional)
+idempotency_key (protected side effect intent only)
+supersedes_message_ref (optional)
 ```
 
 ### payload 원칙
@@ -281,6 +290,8 @@ correlation_ref (optional)
 - `references`
 
 `references`는 항상 배열이고, 비어 있어도 허용한다.
+
+`artifact_version_refs`는 artifact의 logical id가 아니라 exact version ref를 가리킨다.
 
 ### constraints 원칙
 
@@ -297,6 +308,14 @@ summary
 
 - `source_ref`
 - `details`
+
+### routing과 역할 label
+
+domain routing은 `target_capability` 기준이다.
+
+- `from_role`과 `to_role`은 UI나 projection label로 쓸 수 있다.
+- endpoint registry에 공개되는 routing key는 role name이 아니라 capability다.
+- 외부 표면에서는 `tc://...` 형태의 ref를 쓰고, 내부 domain model은 같은 identity를 id로 저장할 수 있다.
 
 ## checkpoint 최소 계약
 
@@ -338,6 +357,9 @@ checkpoint는 `고정 상태코드 + 짧은 설명`으로 간다.
   - `reassigned_endpoint`
 - `retry_reason_code`
 - `retry_attempt`
+
+`retry_attempt`는 checkpoint payload 안에서 현재 `attempt_no`를 복사해 남기는 값이다.
+실행 단위의 identity는 항상 `attempt_ref`다.
 
 ## continuity 원칙
 
@@ -445,12 +467,13 @@ workflow orchestrator까지 다 하는 제품
 
 ## Related Docs
 
-- [touch-connect-overview.md](/Volumes/WD/Developments/touch-connect/docs/active/foundation/touch-connect-overview.md)
-- [message-centered-platform-principles.md](/Volumes/WD/Developments/touch-connect/docs/active/foundation/message-centered-platform-principles.md)
-- [market-and-research.md](/Volumes/WD/Developments/touch-connect/docs/active/foundation/market-and-research.md)
-- [go-ddd-sonarqube-baseline.md](/Volumes/WD/Developments/touch-connect/docs/active/engineering/go-ddd-sonarqube-baseline.md)
-- [message-task-state-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/message-task-state-model.md)
-- [artifact-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/artifact-model.md)
-- [approval-identity-policy.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/approval-identity-policy.md)
-- [delivery-semantics.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/delivery-semantics.md)
-- [mvp-canonical-scenario.md](/Volumes/WD/Developments/touch-connect/docs/active/product/mvp-canonical-scenario.md)
+- [touch-connect-overview.md](docs/active/foundation/touch-connect-overview.md)
+- [message-centered-platform-principles.md](docs/active/foundation/message-centered-platform-principles.md)
+- [market-and-research.md](docs/active/foundation/market-and-research.md)
+- [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
+- [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
+- [artifact-model.md](docs/active/contracts/artifact-model.md)
+- [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
+- [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
+- [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)
+- [mvp-canonical-scenario.md](docs/active/product/mvp-canonical-scenario.md)

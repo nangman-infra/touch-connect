@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: contract-model
 > Scope: message, room, thread, task, correlation의 관계와 task state machine
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/contracts/message-task-state-model.md`
+> Canonical Path: `docs/active/contracts/message-task-state-model.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-26
+> Last Reviewed: 2026-04-30
 
 # Message Task State Model
 
@@ -97,6 +97,7 @@ task_id
 task_revision
 message_id
 correlation_id
+attempt_ref
 attempt_no
 ```
 
@@ -104,8 +105,44 @@ attempt_no
 
 - `thread_sequence`는 thread 내부 정렬용이다.
 - `task_revision`은 task 상태 projection용이다.
-- `attempt_no`는 retry 시 증가한다.
+- `attempt_ref`는 특정 endpoint가 특정 message를 맡은 실행 단위의 stable identity다.
+- `attempt_no`는 task-local retry projection이며 retry 시 증가한다.
+- identity 참조와 lineage는 `attempt_ref`를 쓰고, 사람이 읽는 retry 순서나 task projection은 `attempt_no`를 쓴다.
 - `correlation_id`는 요청-응답-외부 호출을 묶지만 parent container는 아니다.
+- 내부 domain model은 `_id`를 기준으로 저장하고, 외부 message/API surface는 같은 identity를 `tc://...` 형태의 `_ref`로 노출할 수 있다.
+
+## Canonical message envelope
+
+현재 기준으로 message envelope는 아래 필드를 최소 계약으로 둔다.
+
+```text
+message_id
+room_id
+thread_id
+thread_sequence
+sender_endpoint_ref
+target_capability
+task_id (optional)
+correlation_id (optional)
+delivery_class
+readback_required
+payload.summary
+payload.body
+payload.references[]
+constraints[]
+artifact_version_refs[]
+idempotency_key (required for protected side effect intent)
+supersedes_message_id (optional)
+created_at
+```
+
+규칙:
+
+- `target_capability`는 routing의 1차 기준이며 endpoint 내부 skill을 노출하지 않는다.
+- `payload.references[]`는 message가 참조하는 입력 ref이고, `artifact_version_refs[]`는 artifact ledger의 exact version ref다.
+- `delivery_class`와 `readback_required`는 delivery contract와 같은 값을 사용한다.
+- `idempotency_key`는 보호된 외부 side effect intent가 있을 때만 필수다.
+- `from_role`이나 `to_role`은 UI/projection label일 수 있지만 domain routing key가 아니다.
 
 ## Task 상태 집합
 
@@ -120,12 +157,22 @@ attempt_no
 - `completed`
   - terminal state. 성공적으로 끝났다.
 - `failed`
-  - 현재 attempt는 실패했다.
+  - 현재 task가 실패 projection 상태이며 explicit retry 또는 cancel 결정이 필요하다.
 - `canceled`
   - terminal state. 더 진행하지 않는다.
 
 `completed`와 `canceled`는 terminal state다.  
-`failed`는 explicit retry가 있을 때만 다시 `working`으로 복귀할 수 있다.
+`failed`는 terminal state가 아니며 explicit retry가 있을 때만 다시 `working`으로 복귀할 수 있다.
+
+## Task failure와 attempt failure
+
+attempt failure와 task failure는 분리한다.
+
+- attempt failure는 특정 endpoint가 맡은 한 실행의 실패 record다.
+- task `failed`는 현재 task projection이 더 진행할 수 없음을 나타내는 상태다.
+- 한 attempt가 실패해도 retry policy나 takeover가 남아 있으면 task가 반드시 `failed`로 전이되는 것은 아니다.
+- retry가 확정되면 같은 `task_id`를 유지하고 새 attempt를 만든 뒤 `attempt_no`를 증가시킨다.
+- intent 자체가 바뀌면 retry가 아니라 새 `task_id`를 발급한다.
 
 ## Input Required reason
 
@@ -165,7 +212,7 @@ reason은 free text가 아니라 enum으로 관리하는 것을 기본값으로 
 ## Retry 규칙
 
 - retry는 explicit user or policy action으로만 시작한다.
-- retry 시 `task_id`는 유지하고 `attempt_no`를 증가시킨다.
+- retry 시 `task_id`는 유지하고 새 attempt를 만들며 `attempt_no`를 증가시킨다.
 - retry로 다시 시작할 때 state는 `working`으로 전이한다.
 - 기존 failure record는 history에 남긴다.
 - intent 자체가 바뀌면 retry가 아니라 새 `task_id`를 발급한다.
@@ -188,10 +235,11 @@ reason은 free text가 아니라 enum으로 관리하는 것을 기본값으로 
 
 ## Related Docs
 
-- [delivery-semantics.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/delivery-semantics.md)
-- [artifact-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/artifact-model.md)
-- [approval-identity-policy.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/approval-identity-policy.md)
-- [mvp-canonical-scenario.md](/Volumes/WD/Developments/touch-connect/docs/active/product/mvp-canonical-scenario.md)
+- [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
+- [artifact-model.md](docs/active/contracts/artifact-model.md)
+- [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
+- [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)
+- [mvp-canonical-scenario.md](docs/active/product/mvp-canonical-scenario.md)
 
 ## Sources
 

@@ -1,7 +1,7 @@
 > Document Status: active
 > Document Type: foundation
 > Scope: touch-connect의 제품 정의와 문제 재정의
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/foundation/touch-connect-overview.md`
+> Canonical Path: `docs/active/foundation/touch-connect-overview.md`
 > Source Of Truth: yes
 > Last Reviewed: 2026-04-27
 
@@ -102,13 +102,13 @@
 
 현재 제품의 최종 운영 정의는 아래 문서에서 더 구체적으로 닫는다.
 
-- [touch-connect-product-definition.md](/Volumes/WD/Developments/touch-connect/docs/active/product/touch-connect-product-definition.md)
+- [touch-connect-product-definition.md](docs/active/product/touch-connect-product-definition.md)
 
 현재 구현 전 핵심 계약은 아래 문서에서 닫는다.
 
-- [go-ddd-sonarqube-baseline.md](/Volumes/WD/Developments/touch-connect/docs/active/engineering/go-ddd-sonarqube-baseline.md)
-- [message-task-state-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/message-task-state-model.md)
-- [artifact-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/artifact-model.md)
-- [approval-identity-policy.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/approval-identity-policy.md)
-- [delivery-semantics.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/delivery-semantics.md)
-- [mvp-canonical-scenario.md](/Volumes/WD/Developments/touch-connect/docs/active/product/mvp-canonical-scenario.md)
+- [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
+- [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
+- [artifact-model.md](docs/active/contracts/artifact-model.md)
+- [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
+- [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
+- [mvp-canonical-scenario.md](docs/active/product/mvp-canonical-scenario.md)

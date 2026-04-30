@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: active-index
 > Scope: 현재 기준으로 직접 참조되는 문서 registry
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/README.md`
+> Canonical Path: `docs/active/README.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-27
+> Last Reviewed: 2026-04-30
 
 # Active Docs
 
@@ -24,48 +24,50 @@
 
 ### Structural Indexes
 
-- [docs/README.md](/Volumes/WD/Developments/touch-connect/docs/README.md)
+- [docs/README.md](docs/README.md)
   - 문서 체계 전체의 최상위 인덱스
-- [planned/README.md](/Volumes/WD/Developments/touch-connect/docs/planned/README.md)
+- [planned/README.md](docs/planned/README.md)
   - planned 디렉터리의 의미와 사용 규칙
-- [archive/README.md](/Volumes/WD/Developments/touch-connect/docs/archive/README.md)
+- [archive/README.md](docs/archive/README.md)
   - archive 디렉터리의 의미와 사용 규칙
 
 ### Foundation
 
-- [touch-connect-overview.md](/Volumes/WD/Developments/touch-connect/docs/active/foundation/touch-connect-overview.md)
+- [touch-connect-overview.md](docs/active/foundation/touch-connect-overview.md)
   - 제품 한 줄 정의, 문제 재정의, 제품 경계, 핵심 가설
-- [message-centered-platform-principles.md](/Volumes/WD/Developments/touch-connect/docs/active/foundation/message-centered-platform-principles.md)
+- [message-centered-platform-principles.md](docs/active/foundation/message-centered-platform-principles.md)
   - 메시지 중심 협업 플랫폼 원칙, handoff 기준, 엔터프라이즈 요구사항
-- [market-and-research.md](/Volumes/WD/Developments/touch-connect/docs/active/foundation/market-and-research.md)
+- [market-and-research.md](docs/active/foundation/market-and-research.md)
   - 시장/표준/논문/벤치마크 리서치
 
 ### Engineering
 
-- [go-ddd-sonarqube-baseline.md](/Volumes/WD/Developments/touch-connect/docs/active/engineering/go-ddd-sonarqube-baseline.md)
+- [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
   - Go 구현 원칙, DDD 경계, SonarQube 품질 게이트 기준
 
 ### Contracts
 
-- [message-task-state-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/message-task-state-model.md)
+- [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
   - room/thread/task/message/correlation 관계와 task state machine
-- [artifact-model.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/artifact-model.md)
+- [artifact-model.md](docs/active/contracts/artifact-model.md)
   - artifact identity, versioning, retention, lineage
-- [approval-identity-policy.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/approval-identity-policy.md)
+- [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
   - actor identity, capability policy, approval와 re-approval 규칙
-- [delivery-semantics.md](/Volumes/WD/Developments/touch-connect/docs/active/contracts/delivery-semantics.md)
-  - ordering, ack, readback, redelivery, dedupe, expiry 규칙
+- [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
+  - ordering, ack, readback, redelivery, dedupe, expiry, side effect execution 규칙
+- [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)
+  - checkpoint, claim/lease, takeover, processing DLQ 규칙
 
 ### Product
 
-- [touch-connect-product-definition.md](/Volumes/WD/Developments/touch-connect/docs/active/product/touch-connect-product-definition.md)
+- [touch-connect-product-definition.md](docs/active/product/touch-connect-product-definition.md)
   - 제품의 최종 정의, 1급 객체, 책임 경계, v1 message-layer 철학
-- [mvp-canonical-scenario.md](/Volumes/WD/Developments/touch-connect/docs/active/product/mvp-canonical-scenario.md)
+- [mvp-canonical-scenario.md](docs/active/product/mvp-canonical-scenario.md)
   - v1에서 반드시 성공해야 하는 대표 시나리오와 완료 조건
 
 ### Governance
 
-- [document-lifecycle.md](/Volumes/WD/Developments/touch-connect/docs/active/governance/document-lifecycle.md)
+- [document-lifecycle.md](docs/active/governance/document-lifecycle.md)
   - 문서 상태 모델, 승격/보관 규칙, 인덱스 관리 규칙
 
 ## 읽는 순서
@@ -80,5 +82,6 @@
 8. Contracts의 `artifact-model`
 9. Contracts의 `approval-identity-policy`
 10. Contracts의 `delivery-semantics`
-11. Product의 `mvp-canonical-scenario`
-12. Governance의 `document-lifecycle`
+11. Contracts의 `checkpoint-and-takeover-model`
+12. Product의 `mvp-canonical-scenario`
+13. Governance의 `document-lifecycle`

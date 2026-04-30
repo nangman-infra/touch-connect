@@ -1,7 +1,7 @@
 > Document Status: support
 > Document Type: template-asset
 > Scope: 상태 관리 문서를 작성할 때 복사해서 쓰는 템플릿
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/templates/document-template.md`
+> Canonical Path: `docs/templates/document-template.md`
 > Source Of Truth: no
 > Last Reviewed: 2026-04-26
 > Supersedes: `none`

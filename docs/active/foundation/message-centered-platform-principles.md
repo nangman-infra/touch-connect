@@ -1,9 +1,9 @@
 > Document Status: active
 > Document Type: foundation
 > Scope: 메시지 중심 협업 플랫폼 설계 원칙과 handoff 기준
-> Canonical Path: `/Volumes/WD/Developments/touch-connect/docs/active/foundation/message-centered-platform-principles.md`
+> Canonical Path: `docs/active/foundation/message-centered-platform-principles.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-26
+> Last Reviewed: 2026-04-30
 
 # Message-Centered Platform Principles
 
@@ -185,6 +185,9 @@ supersedes_message_id
 provenance
 timestamp
 ```
+
+구현 기준 canonical envelope는 [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)의 계약을 따른다.
+이 목록의 `from_role`과 `to_role`은 역할 이해를 돕는 projection label이며, domain routing key는 `target_capability`다.
 
 ### 필드 해석 원칙
 

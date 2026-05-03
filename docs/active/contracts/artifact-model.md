@@ -3,7 +3,7 @@
 > Scope: artifact identity, versioning, retention, access, lineage 계약
 > Canonical Path: `docs/active/contracts/artifact-model.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-26
+> Last Reviewed: 2026-05-03
 
 # Artifact Model
 
@@ -95,6 +95,30 @@ based_on_artifact_version_ids
 - `structured_data`
 
 새 kind를 추가할 수 있지만, 기존 kind를 overloaded free text로 쓰지 않는다.
+
+### Execution log artifact
+
+worker execution log는 `log_bundle` artifact version이다.
+
+필수 내용:
+
+- `message_ref`
+- `attempt_ref`
+- `target_capability`
+- `outcome`
+- `summary`
+- `failure_reason_code`
+- `stdout`
+- `stderr`
+- `exit_code`
+- `duration_ms`
+
+규칙:
+
+- execution log file name은 message ref와 attempt ref에서 deterministic하게 만든다.
+- execution log는 task-owned artifact로 등록한다.
+- `storage_ref`는 local file, object store, content-addressed key 등 worker storage adapter가 정한다.
+- checkpoint는 logical artifact가 아니라 exact execution log artifact version ref를 참조한다.
 
 ## Version lifecycle
 

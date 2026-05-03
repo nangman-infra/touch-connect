@@ -1,0 +1,258 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
+	"github.com/nangman-infra/touch-connect/tc-server/internal/application"
+	"github.com/nangman-infra/touch-connect/tc-server/internal/domain"
+)
+
+type Handler struct {
+	service *application.Service
+}
+
+func NewHandler(service *application.Service) *Handler {
+	return &Handler{service: service}
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(r.URL.Path, "/")
+	switch {
+	case r.Method == http.MethodGet && path == "healthz":
+		writeJSON(w, http.StatusOK, h.service.Health())
+	case r.Method == http.MethodGet && path == "readyz":
+		health := h.service.Health()
+		health.Status = "ready"
+		writeJSON(w, http.StatusOK, health)
+	case r.Method == http.MethodGet && path == "version":
+		writeJSON(w, http.StatusOK, h.service.Version())
+	case r.Method == http.MethodPost && path == "v1/endpoints/register":
+		h.registerEndpoint(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/endpoints/") && strings.HasSuffix(path, "/heartbeat"):
+		h.heartbeatEndpoint(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/endpoints/") && strings.HasSuffix(path, "/capabilities"):
+		h.advertiseCapabilities(w, r, path)
+	case r.Method == http.MethodPost && path == "v1/messages":
+		h.ingressMessage(w, r)
+	case r.Method == http.MethodPost && path == "v1/messages/claim-next":
+		h.claimNextMessage(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/messages/") && strings.HasSuffix(path, "/claim"):
+		h.claimMessage(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/checkpoints"):
+		h.submitCheckpoint(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/readback"):
+		h.submitReadback(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/lease"):
+		h.refreshLease(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/artifacts"):
+		h.registerArtifactVersion(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/approvals"):
+		h.recordApprovalDecision(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/side-effects"):
+		h.startSideEffectExecution(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/complete"):
+		h.completeAttempt(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/side-effects/") && strings.HasSuffix(path, "/complete"):
+		h.completeSideEffectExecution(w, r, path)
+	default:
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+	}
+}
+
+func (h *Handler) registerEndpoint(w http.ResponseWriter, r *http.Request) {
+	var req contracts.EndpointRegistrationRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.RegisterEndpoint(req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) advertiseCapabilities(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.CapabilityAdvertisementRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.AdvertiseCapabilities(endpointRefFromPath(path, "/capabilities"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) heartbeatEndpoint(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.EndpointHeartbeatRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.HeartbeatEndpoint(endpointRefFromPath(path, "/heartbeat"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) ingressMessage(w http.ResponseWriter, r *http.Request) {
+	var req contracts.MessageIngressRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.IngressMessage(req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) claimMessage(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.ClaimMessageRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.ClaimMessage(messageRefFromPath(path), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) claimNextMessage(w http.ResponseWriter, r *http.Request) {
+	var req contracts.ClaimNextMessageRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.ClaimNextMessage(req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) submitCheckpoint(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.CheckpointRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.SubmitCheckpoint(attemptRefFromPath(path, "/checkpoints"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) submitReadback(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.ReadbackRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.SubmitReadback(attemptRefFromPath(path, "/readback"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) refreshLease(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.RefreshLeaseRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.RefreshLease(attemptRefFromPath(path, "/lease"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) registerArtifactVersion(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.ArtifactVersionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.RegisterArtifactVersion(attemptRefFromPath(path, "/artifacts"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) recordApprovalDecision(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.ApprovalDecisionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.RecordApprovalDecision(attemptRefFromPath(path, "/approvals"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) startSideEffectExecution(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.SideEffectExecutionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.StartSideEffectExecution(attemptRefFromPath(path, "/side-effects"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) completeAttempt(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.CompleteAttemptRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.CompleteAttempt(attemptRefFromPath(path, "/complete"), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) completeSideEffectExecution(w http.ResponseWriter, r *http.Request, path string) {
+	var req contracts.CompleteSideEffectExecutionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.CompleteSideEffectExecution(sideEffectRefFromPath(path), req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "request body must be valid json")
+		return false
+	}
+	return true
+}
+
+func writeResult(w http.ResponseWriter, status int, value any, err error) {
+	if err == nil {
+		writeJSON(w, status, value)
+		return
+	}
+	if errors.Is(err, domain.ErrEndpointNotFound) ||
+		errors.Is(err, domain.ErrCapabilityNotFound) ||
+		errors.Is(err, domain.ErrMessageNotFound) ||
+		errors.Is(err, domain.ErrAttemptNotFound) ||
+		errors.Is(err, domain.ErrArtifactNotFound) ||
+		errors.Is(err, domain.ErrApprovalNotFound) ||
+		errors.Is(err, domain.ErrSideEffectNotFound) {
+		writeError(w, http.StatusNotFound, err.Error(), err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrMessageUnavailable) ||
+		errors.Is(err, domain.ErrStaleAttempt) ||
+		errors.Is(err, domain.ErrEndpointStale) ||
+		errors.Is(err, domain.ErrLeaseExpired) ||
+		errors.Is(err, domain.ErrMessageDeadLettered) ||
+		errors.Is(err, domain.ErrArtifactExists) ||
+		errors.Is(err, domain.ErrApprovalRequired) ||
+		errors.Is(err, domain.ErrApprovalRejected) ||
+		errors.Is(err, domain.ErrApprovalExpired) ||
+		errors.Is(err, domain.ErrApprovalHashMismatch) ||
+		errors.Is(err, domain.ErrSelfApproval) ||
+		errors.Is(err, domain.ErrSideEffectConflict) {
+		writeError(w, http.StatusConflict, err.Error(), err.Error())
+		return
+	}
+	writeError(w, http.StatusBadRequest, err.Error(), err.Error())
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, code string, message string) {
+	writeJSON(w, status, contracts.ErrorResponse{Code: code, Message: message})
+}
+
+func endpointRefFromPath(path string, suffix string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(path, "v1/endpoints/"), suffix)
+}
+
+func messageRefFromPath(path string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(path, "v1/messages/"), "/claim")
+}
+
+func attemptRefFromPath(path string, suffix string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(path, "v1/attempts/"), suffix)
+}
+
+func sideEffectRefFromPath(path string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(path, "v1/side-effects/"), "/complete")
+}

@@ -3,7 +3,7 @@
 > Scope: AI 간 통신을 위한 TCP/IP-like message layer의 통합 구현 계약
 > Canonical Path: `docs/active/contracts/ai-communication-layer-contract.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-03
 > Supersedes: `none`
 > Superseded By: `none`
 
@@ -49,6 +49,20 @@ IP에서 차용하는 관점은 addressing과 routing이다.
 - endpoint 내부의 skill, prompt, local path, credential은 routing layer에 노출하지 않는다.
 - direct routing, broadcast, reply correlation을 지원할 수 있다.
 
+### Queue-like endpoint polling
+
+v1 worker는 특정 `message_ref`를 미리 알지 않아도 서버에 붙어 다음 작업을 요청할 수 있어야 한다.
+
+필수 규칙:
+
+- worker는 등록된 `endpoint_ref`와 capability registry를 기준으로 `claim-next`를 요청한다.
+- server는 endpoint capability와 message `target_capability`가 맞는 message만 반환한다.
+- 선택 우선순위는 `takeover_candidate`가 `available`보다 높다.
+- claim 가능한 message가 없으면 실패가 아니라 empty queue 응답을 반환한다.
+- empty queue는 delivery failure가 아니며 worker는 poll interval 후 다시 요청한다.
+- server는 endpoint 내부 skill 선택이나 업무 판단을 하지 않는다.
+- claim response는 worker execution adapter가 판단할 수 있도록 message payload와 constraints 원문을 포함한다.
+
 ### TCP-like delivery control
 
 TCP에서 차용하는 관점은 수신 확인과 재전송과 중복 방지다.
@@ -71,6 +85,49 @@ TCP/IP만으로는 AI 작업의 처리 연속성을 보장할 수 없다.
 - worker는 attempt 안에서 checkpoint를 직접 보낸다.
 - server는 checkpoint를 추론해서 만들지 않고 기록하고 계약만 검증한다.
 - takeover는 raw history replay가 아니라 checkpoint-first recovery를 기본으로 한다.
+- long-running worker는 register 이후 heartbeat, claim-next polling, lease refresh, checkpoint 제출을 반복한다.
+- worker가 정상 종료되면 endpoint는 `offline` heartbeat를 보낸다.
+
+### Worker execution adapter
+
+worker는 claim된 message를 직접 hard-coded success로 닫으면 안 된다.
+
+필수 규칙:
+
+- worker runtime은 message payload, constraints, resume context를 execution adapter에 넘긴다.
+- execution adapter는 endpoint 내부 책임이며 server는 adapter 내부 판단을 하지 않는다.
+- adapter 결과는 `completed`, `missing_fields`, `failed` 중 하나로 정규화된다.
+- `completed`는 `in_progress` checkpoint 이후 attempt completion으로 기록한다.
+- `missing_fields`는 readback과 `blocked_missing_fields` checkpoint로 기록한다.
+- `failed`는 `failed` checkpoint와 `failure_reason_code`로 기록한다.
+- artifact refs를 checkpoint에 연결하려면 먼저 artifact ledger에 등록된 exact artifact version이어야 한다.
+
+### Local command execution adapter
+
+로컬 명령 실행은 worker 내부 execution adapter의 한 종류다.
+
+필수 규칙:
+
+- local command executor는 명시적으로 켠 경우에만 사용한다.
+- 실행 가능한 command는 allowlist에 있어야 한다.
+- command는 shell string으로 실행하지 않고 command와 args를 분리해 실행한다.
+- workdir는 absolute path여야 한다.
+- timeout은 worker 설정으로 명시해야 하며, timeout 초과는 `failed`와 `command_timeout`으로 기록한다.
+- allowlist 밖 command는 실행하지 않고 `failed`와 `command_not_allowed`로 기록한다.
+- non-zero exit은 `failed`와 `command_exit_nonzero`로 기록한다.
+- stdout, stderr, exit code는 worker execution result에 구조화해 남기며, artifact ledger 등록은 별도 단계에서 수행한다.
+
+### Execution log artifact
+
+worker가 command execution result를 artifact로 남기도록 설정된 경우 아래를 지킨다.
+
+- artifact directory는 absolute path여야 한다.
+- execution log는 message ref와 attempt ref를 기반으로 deterministic file name을 가져야 한다.
+- execution log artifact는 `log_bundle` kind와 `application/json` media type을 사용한다.
+- artifact version은 서버 artifact ledger에 등록된 뒤 checkpoint artifact refs에 연결한다.
+- 완료된 command는 completed checkpoint가 execution log artifact version ref를 포함해야 한다.
+- 실패한 command는 failed checkpoint가 execution log artifact version ref를 포함해야 한다.
+- artifact `storage_ref`는 worker storage adapter가 만든 opaque reference이며, 서버는 내용을 직접 해석하지 않는다.
 
 ## 차용하지 않는 것
 

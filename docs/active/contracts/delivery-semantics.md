@@ -3,7 +3,7 @@
 > Scope: ordering, ack, readback, redelivery, dedupe, expiry, supersede, protected side effect 실행 계약
 > Canonical Path: `docs/active/contracts/delivery-semantics.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-03
 
 # Delivery Semantics
 
@@ -87,6 +87,83 @@ readback은 receiver가 아래를 다시 확인하는 행위다.
 - next_action
 
 critical handoff에서는 ack만으로 충분하지 않고 readback이 필요할 수 있다.
+
+## Worker polling과 empty queue
+
+worker daemon은 서버에 등록된 뒤 직접 message id를 알지 못해도 다음 처리 대상을 요청할 수 있다.
+
+`claim-next` 응답은 아래 두 종류다.
+
+- `empty=true`
+  - 현재 endpoint capability로 claim 가능한 message가 없다.
+  - 오류가 아니며 DLQ나 delivery failure를 만들지 않는다.
+  - worker는 poll interval 후 다시 요청한다.
+- `claim`
+  - 서버가 message 단위 claim을 성공시켰다.
+  - worker는 즉시 `claimed` checkpoint를 append해야 한다.
+  - worker execution adapter가 판단할 수 있도록 payload와 constraints 원문을 포함한다.
+  - 이후 readback, lease refresh, progress checkpoint, completion checkpoint는 attempt 안에 남긴다.
+
+규칙:
+
+- worker는 queue empty를 실패로 해석하면 안 된다.
+- worker는 processing 중 lease를 갱신해야 한다.
+- worker가 정상 종료되면 endpoint 상태를 `offline`으로 갱신해야 한다.
+- offline은 failure가 아니라 현재 연결이 없는 상태다.
+
+## Worker execution 결과 매핑
+
+worker runtime은 endpoint 내부 execution adapter 결과를 delivery/processing ledger로 정규화한다.
+
+결과 매핑:
+
+- `completed`
+  - `in_progress` checkpoint를 남긴다.
+  - attempt를 `completed`로 닫는다.
+- `missing_fields`
+  - 누락 필드와 이유가 포함된 readback을 남긴다.
+  - attempt checkpoint는 `blocked_missing_fields`가 된다.
+  - message state는 `input_required`가 된다.
+- `failed`
+  - `failure_reason_code`가 포함된 `failed` checkpoint를 남긴다.
+  - message state는 `failed`가 된다.
+
+규칙:
+
+- server는 execution adapter 내부 결정을 대신하지 않는다.
+- server는 결과 형식, attempt owner, lease, checkpoint artifact refs만 검증한다.
+- executor error는 protected side effect 성공으로 dedupe하면 안 되며 `failed` checkpoint로 남겨야 한다.
+
+## Local command result reason codes
+
+local command executor가 사용하는 기본 실패 reason code는 아래다.
+
+- `command_not_allowed`
+  - command가 worker allowlist에 없어서 실행하지 않았다.
+- `command_workdir_not_absolute`
+  - workdir가 absolute path가 아니어서 실행하지 않았다.
+- `command_timeout`
+  - worker command timeout 안에 종료되지 않아 중단했다.
+- `command_exit_nonzero`
+  - 프로세스는 실행됐지만 exit code가 0이 아니었다.
+- `command_start_failed`
+  - 프로세스 시작 자체가 실패했다.
+- `command_request_invalid_json`
+  - payload body가 command request JSON으로 파싱되지 않았다.
+
+payload body가 비어 있거나 `command` 필드가 없으면 실행 실패가 아니라 `missing_fields`로 처리한다.
+
+## Execution log artifact 연결
+
+worker가 execution log artifact store를 사용하면 command result는 checkpoint 전에 artifact ledger에 등록된다.
+
+규칙:
+
+- artifact 등록 실패 시 completed 또는 failed checkpoint를 먼저 남기면 안 된다.
+- completed checkpoint는 성공 command의 execution log artifact version ref를 포함해야 한다.
+- failed checkpoint는 실패 command의 execution log artifact version ref를 포함해야 한다.
+- `blocked_missing_fields`는 command가 실행되지 않은 상태이므로 execution log artifact가 필수는 아니다.
+- execution log artifact는 stdout, stderr, exit code, duration, reason code를 구조화해 담는다.
 
 ## Timeout과 redelivery
 

@@ -1,0 +1,164 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
+)
+
+type LoopOptions struct {
+	PollInterval      time.Duration
+	HeartbeatInterval time.Duration
+	MaxMessages       int
+}
+
+type ProcessResult struct {
+	Empty      bool
+	MessageRef string
+	AttemptRef string
+	Outcome    string
+	Completed  bool
+	Blocked    bool
+	Failed     bool
+}
+
+func DefaultLoopOptions() LoopOptions {
+	return LoopOptions{
+		PollInterval:      time.Second,
+		HeartbeatInterval: 10 * time.Second,
+	}
+}
+
+func (r *Runtime) Run(ctx context.Context, options LoopOptions) error {
+	accepted, err := options.Validated()
+	if err != nil {
+		return err
+	}
+	if err := r.Register(ctx); err != nil {
+		return err
+	}
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	heartbeatErrors := make(chan error, 1)
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		r.heartbeatLoop(heartbeatCtx, accepted.HeartbeatInterval, heartbeatErrors)
+	}()
+	err = r.runProcessingLoop(ctx, accepted, heartbeatErrors)
+	stopHeartbeat()
+	<-heartbeatDone
+	r.markOffline()
+	return err
+}
+
+func (r *Runtime) ProcessNext(ctx context.Context) (ProcessResult, error) {
+	next, err := r.client.ClaimNextMessage(ctx, contracts.ClaimNextMessageRequest{
+		EndpointRef: r.config.EndpointRef,
+	})
+	if err != nil {
+		return ProcessResult{}, err
+	}
+	if next.Empty || next.Claim == nil {
+		return ProcessResult{Empty: true}, nil
+	}
+	claim := *next.Claim
+	if err := r.acknowledgeClaim(ctx, claim); err != nil {
+		return ProcessResult{}, err
+	}
+	attemptRef, outcome, err := r.finishClaimAfterAck(ctx, claim)
+	if err != nil {
+		return ProcessResult{}, err
+	}
+	return ProcessResult{
+		MessageRef: claim.MessageRef,
+		AttemptRef: attemptRef,
+		Outcome:    outcome,
+		Completed:  outcome == ExecutionOutcomeCompleted,
+		Blocked:    outcome == ExecutionOutcomeMissingFields,
+		Failed:     outcome == ExecutionOutcomeFailed,
+	}, nil
+}
+
+func (r *Runtime) MarkOffline(ctx context.Context) error {
+	return r.sendHeartbeat(ctx, "offline")
+}
+
+func (r *Runtime) runProcessingLoop(ctx context.Context, options LoopOptions, heartbeatErrors <-chan error) error {
+	processed := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-heartbeatErrors:
+			return err
+		default:
+		}
+		result, err := r.ProcessNext(ctx)
+		if err != nil {
+			return err
+		}
+		if !result.Empty {
+			processed++
+			if options.MaxMessages > 0 && processed >= options.MaxMessages {
+				return nil
+			}
+			continue
+		}
+		if err := waitForNextPoll(ctx, options.PollInterval, heartbeatErrors); err != nil {
+			return err
+		}
+	}
+}
+
+func (r *Runtime) heartbeatLoop(ctx context.Context, interval time.Duration, errors chan<- error) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := r.Heartbeat(ctx); err != nil {
+				select {
+				case errors <- err:
+				default:
+				}
+				return
+			}
+		}
+	}
+}
+
+func (r *Runtime) markOffline() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = r.MarkOffline(ctx)
+}
+
+func (o LoopOptions) Validated() (LoopOptions, error) {
+	if o.PollInterval == 0 {
+		o.PollInterval = time.Second
+	}
+	if o.HeartbeatInterval == 0 {
+		o.HeartbeatInterval = 10 * time.Second
+	}
+	if o.PollInterval < 0 || o.HeartbeatInterval < 0 || o.MaxMessages < 0 {
+		return LoopOptions{}, errors.New("worker loop options must not be negative")
+	}
+	return o, nil
+}
+
+func waitForNextPoll(ctx context.Context, interval time.Duration, heartbeatErrors <-chan error) error {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-heartbeatErrors:
+		return err
+	case <-timer.C:
+		return nil
+	}
+}

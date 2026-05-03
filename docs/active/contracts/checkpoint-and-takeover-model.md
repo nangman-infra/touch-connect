@@ -3,7 +3,7 @@
 > Scope: checkpoint, raw history, artifact ledger, takeover, claim/lease, redelivery의 current contract
 > Canonical Path: `docs/active/contracts/checkpoint-and-takeover-model.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-03
 > Supersedes: `none`
 > Superseded By: `none`
 
@@ -150,12 +150,17 @@ checkpoint는 그 요약 ref만 가진다.
 - claim 성공 시 checkpoint의 `claim_owner_endpoint_ref`와 `claim_epoch`를 갱신한다
 - claim은 영구 lock이 아니라 lease 기반이다
 - claim의 기본 단위는 `task`가 아니라 `message`다
+- endpoint는 특정 message id를 지정해 claim할 수도 있고, 자신의 capability에 맞는 다음 message를 `claim-next`로 요청할 수도 있다
+- `claim-next`는 `takeover_candidate`를 `available`보다 먼저 선택한다
+- claim 가능한 message가 없으면 empty queue로 응답하며 checkpoint나 attempt를 만들지 않는다
+- server는 claim record를 만들지만 `claimed` checkpoint는 worker가 직접 append해야 한다
 
 ### Lease
 
 - owner endpoint는 주기적으로 checkpoint 또는 work heartbeat를 보낸다
 - lease가 만료되면 server는 claim을 orphaned 상태로 본다
 - orphaned message/task는 다른 endpoint가 takeover claim할 수 있다
+- worker daemon은 처리 중 lease refresh를 보내야 하며, 정상 종료 시 endpoint를 `offline`으로 표시한다
 
 lease는 고정 timeout만으로 판정하지 않는다.
 

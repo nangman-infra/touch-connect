@@ -1,0 +1,6 @@
+# Living contract docs are maintained locally and intentionally not tracked.
+docs/
+**/docs/
+
+# Local assistant/workflow state.
+.claude/

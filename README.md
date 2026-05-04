@@ -6,10 +6,7 @@ A2A and AGNTCY move agent messages across systems. `touch-connect` makes those h
 
 It is not a queue, transport, workflow engine, or new wire protocol. Production transport, durability, and replay belong behind adapters such as NATS JetStream, Temporal, A2A, and AGNTCY-compatible bindings. The built-in memory and SQLite paths exist for local development and tests.
 
-The project is currently docs-first. Start here:
-
-- [docs/README.md](docs/README.md)
-  - active product, contract, engineering, and governance documents
+The project is still contract-first, but living contract docs are maintained locally and are intentionally not tracked in the public Git repository.
 
 Root app units:
 

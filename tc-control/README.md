@@ -59,8 +59,4 @@ GET  /v1/side-effects?task=<task_ref>
 - The read model is currently backed by `tc-server` projection reads, not a separate projection store.
 - Admin web UI is intentionally out of scope for the CLI-first phase.
 
-Detailed implementation docs:
-
-- [docs/implementation-contract.md](docs/implementation-contract.md)
-- [docs/definition-of-done.md](docs/definition-of-done.md)
-- [docs/implementation-task-list.md](docs/implementation-task-list.md)
+Detailed implementation docs are maintained as local living contracts and are intentionally not tracked in the public Git repository.

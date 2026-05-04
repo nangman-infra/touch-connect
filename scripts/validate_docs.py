@@ -249,6 +249,10 @@ def validate_document(document: Document, active_registry: set[Path]) -> list[st
 
 
 def main() -> int:
+    if not DOCS_ROOT.exists():
+        print(f"문서 디렉터리가 없어 docs validation을 건너뜁니다: {DOCS_ROOT}")
+        return 0
+
     documents = sorted(DOCS_ROOT.rglob("*.md"))
     if not documents:
         print(f"검사할 문서가 없습니다: {DOCS_ROOT}")

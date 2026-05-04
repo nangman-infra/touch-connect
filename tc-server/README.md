@@ -22,11 +22,7 @@ It does not own:
 - local shell execution
 - endpoint-internal skill selection
 
-Detailed implementation docs:
-
-- [docs/implementation-contract.md](docs/implementation-contract.md)
-- [docs/definition-of-done.md](docs/definition-of-done.md)
-- [docs/implementation-task-list.md](docs/implementation-task-list.md)
+Detailed implementation docs are maintained as local living contracts and are intentionally not tracked in the public Git repository.
 
 ## Local Run
 

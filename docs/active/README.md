@@ -3,7 +3,7 @@
 > Scope: 현재 기준으로 직접 참조되는 문서 registry
 > Canonical Path: `docs/active/README.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-04
 
 # Active Docs
 
@@ -45,7 +45,7 @@
 - [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
   - Go 구현 원칙, DDD 경계, SonarQube 품질 게이트 기준
 - [transport-adapters.md](docs/active/engineering/transport-adapters.md)
-  - JetStream, Temporal, A2A, AGNTCY adapter 작성 규약과 Store interface 정제 기준
+  - JetStream, Temporal, A2A, AGNTCY adapter 작성 규약과 Store port split 적용 기준
 
 ### Contracts
 
@@ -55,6 +55,8 @@
   - room/thread/task/message/correlation 관계와 task state machine
 - [message-quality-policy.md](docs/active/contracts/message-quality-policy.md)
   - PhraseologyPolicy, CapabilityClaim, readback, missing-constraint 검증 계약
+- [store-port-split-contract.md](docs/active/contracts/store-port-split-contract.md)
+  - tc-server application store를 transport-agnostic ports로 분리하는 계약
 - [artifact-model.md](docs/active/contracts/artifact-model.md)
   - artifact identity, versioning, retention, lineage
 - [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
@@ -87,10 +89,11 @@
 7. Engineering의 `transport-adapters`
 8. Contracts의 `ai-communication-layer-contract`
 9. Contracts의 `message-quality-policy`
-10. Contracts의 `message-task-state-model`
-11. Contracts의 `artifact-model`
-12. Contracts의 `approval-identity-policy`
-13. Contracts의 `delivery-semantics`
-14. Contracts의 `checkpoint-and-takeover-model`
-15. Product의 `mvp-canonical-scenario`
-16. Governance의 `document-lifecycle`
+10. Contracts의 `store-port-split-contract`
+11. Contracts의 `message-task-state-model`
+12. Contracts의 `artifact-model`
+13. Contracts의 `approval-identity-policy`
+14. Contracts의 `delivery-semantics`
+15. Contracts의 `checkpoint-and-takeover-model`
+16. Product의 `mvp-canonical-scenario`
+17. Governance의 `document-lifecycle`

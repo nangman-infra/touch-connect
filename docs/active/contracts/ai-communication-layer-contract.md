@@ -153,7 +153,8 @@ application layer의 store interface는 transport-agnostic해야 한다.
 - `Snapshot` 같은 전체 조회는 production write store가 아니라 projection/query port로 분리한다.
 - external adapter는 `ack`, `nak`, `dedupe`, `lease timeout`, `replay`를 domain state transition에 매핑하되 domain state name을 broker state name으로 바꾸면 안 된다.
 
-구체적인 adapter 작성 규칙과 현재 `tc-server/internal/application/store.go` 평가 기준은 [transport-adapters.md](docs/active/engineering/transport-adapters.md)를 따른다.
+구체적인 Store 분리 규칙과 현재 `tc-server/internal/application/store.go` method mapping은 [store-port-split-contract.md](docs/active/contracts/store-port-split-contract.md)를 따른다.
+adapter 작성 규칙은 [transport-adapters.md](docs/active/engineering/transport-adapters.md)를 따른다.
 
 ## 만들지 않는 것
 
@@ -306,18 +307,20 @@ protected side effect는 approval과 execution ledger를 모두 요구한다.
 
 1. 이 문서
 2. [message-quality-policy.md](docs/active/contracts/message-quality-policy.md)
-3. [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
-4. [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
-5. [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)
-6. [artifact-model.md](docs/active/contracts/artifact-model.md)
-7. [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
-8. [transport-adapters.md](docs/active/engineering/transport-adapters.md)
-9. [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
+3. [store-port-split-contract.md](docs/active/contracts/store-port-split-contract.md)
+4. [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
+5. [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
+6. [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)
+7. [artifact-model.md](docs/active/contracts/artifact-model.md)
+8. [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
+9. [transport-adapters.md](docs/active/engineering/transport-adapters.md)
+10. [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
 
 ## Related Docs
 
 - [touch-connect-product-definition.md](docs/active/product/touch-connect-product-definition.md)
 - [message-quality-policy.md](docs/active/contracts/message-quality-policy.md)
+- [store-port-split-contract.md](docs/active/contracts/store-port-split-contract.md)
 - [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
 - [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
 - [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)

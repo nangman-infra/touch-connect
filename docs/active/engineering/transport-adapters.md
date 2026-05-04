@@ -1,6 +1,6 @@
 > Document Status: active
 > Document Type: engineering-baseline
-> Scope: JetStream, Temporal, A2A, AGNTCY adapter 작성 규약과 Store interface 정제 기준
+> Scope: JetStream, Temporal, A2A, AGNTCY adapter 작성 규약과 Store port split 적용 기준
 > Canonical Path: `docs/active/engineering/transport-adapters.md`
 > Source Of Truth: yes
 > Last Reviewed: 2026-05-04
@@ -117,9 +117,10 @@ memory와 SQLite 기반 store는 local dev/test 및 deterministic integration te
 - outbound dispatch는 A2A Task/Message/Artifact surface에 `tc://...` refs를 metadata로 보존한다.
 - A2A history는 recovery input일 수 있지만 ApprovalChain과 ArtifactLineage source of truth를 대체하지 않는다.
 
-## Store Interface Review
+## Store Port Split Reference
 
 현재 `tc-server/internal/application/store.go`는 구현을 빠르게 검증하기에는 충분하지만, production adapter 전환 전에는 interface ownership을 더 좁혀야 한다.
+구체적인 target ports, current method mapping, migration order, acceptance criteria는 [store-port-split-contract.md](docs/active/contracts/store-port-split-contract.md)를 따른다.
 
 현재 좋은 점:
 
@@ -197,6 +198,7 @@ M1에서 `docker-compose.dev.yml`은 최소 아래 service를 제공해야 한�
 - [ai-communication-layer-contract.md](docs/active/contracts/ai-communication-layer-contract.md)
 - [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)
 - [message-quality-policy.md](docs/active/contracts/message-quality-policy.md)
+- [store-port-split-contract.md](docs/active/contracts/store-port-split-contract.md)
 - [checkpoint-and-takeover-model.md](docs/active/contracts/checkpoint-and-takeover-model.md)
 
 ## Sources

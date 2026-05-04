@@ -3,7 +3,7 @@
 > Scope: touch-connect 문서 체계 전체와 최상위 인덱스
 > Canonical Path: `docs/README.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-04
 
 # Touch Connect Docs
 
@@ -80,6 +80,7 @@ archive 문서는 `왜 archived 되었는지`, `지금 무엇이 이를 대체�
 - [ai-communication-layer-contract.md](docs/active/contracts/ai-communication-layer-contract.md)
 - [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
 - [message-quality-policy.md](docs/active/contracts/message-quality-policy.md)
+- [store-port-split-contract.md](docs/active/contracts/store-port-split-contract.md)
 - [artifact-model.md](docs/active/contracts/artifact-model.md)
 - [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
 - [delivery-semantics.md](docs/active/contracts/delivery-semantics.md)

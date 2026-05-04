@@ -228,8 +228,17 @@ NATS_URL=nats://127.0.0.1:4222 NATS_MONITOR_URL=http://127.0.0.1:8222 go test -t
 ```
 
 `docker-compose.dev.yml`의 `nats` service는 official `nats` image를 `-js`로 실행하고 `-sd /data`로 JetStream data directory를 명시한다.
-`tests/jetstream_integration_test.go`는 `/jsz` monitor endpoint를 확인해 JetStream이 켜져 있는지만 검증한다.
-concrete JetStream adapter behavior는 다음 PR에서 `DeliveryAdapter` 구현과 함께 추가한다.
+`tests/jetstream_integration_test.go`는 `/jsz` monitor endpoint를 확인해 JetStream이 켜져 있는지 검증한다.
+`tc-server/internal/infrastructure/jetstream/adapter_integration_test.go`는 실제 adapter publish, `Nats-Msg-Id` dedupe, stored metadata headers를 검증한다.
+
+adapter publish 검증:
+
+```bash
+NATS_URL=nats://127.0.0.1:4222 go test -tags=integration,jetstream ./tc-server/internal/infrastructure/jetstream
+```
+
+현재 concrete adapter는 `PublishAcceptedMessage`까지 구현한다.
+pull consumer fetch와 ack/nak delivery state는 다음 단계에서 구현한다.
 
 ## Stop Doing Enforcement
 

@@ -1,6 +1,6 @@
 # JetStream Adapter Contract
 
-This directory is reserved for the production NATS JetStream adapter.
+This directory contains the production NATS JetStream adapter path.
 
 The adapter must implement transport-facing behavior without changing public
 `tc://...` refs or application ledger semantics.
@@ -56,11 +56,23 @@ Adapter metadata is for troubleshooting, replay input, and trace correlation.
 It must not replace `message_ref`, `attempt_ref`, `correlation_ref`, approval
 refs, or artifact version refs in API responses or CLI output.
 
-## Implementation Gate
+## Current Implementation
 
-The first concrete implementation in this directory must add an integration
-test profile that requires a JetStream-enabled NATS service. The default
-`go test ./...` path must continue to run without external services.
+Implemented:
+
+- `Config`
+- `Adapter`
+- `NewAdapter`
+- stream creation with `WorkQueuePolicy`
+- `PublishAcceptedMessage`
+- publish dedupe through `Nats-Msg-Id`
+- adapter metadata receipt for stream, sequence, subject, and duplicate status
+
+Not connected yet:
+
+- pull consumer fetch
+- ack/nak delivery state
+- service runtime dispatch path
 
 Current W2 bootstrap command:
 
@@ -73,9 +85,19 @@ The bootstrap integration test only proves that local dev NATS has JetStream
 enabled. It intentionally does not claim that the production adapter is
 implemented.
 
+The adapter publish integration test is:
+
+```bash
+NATS_URL=nats://127.0.0.1:4222 go test -tags=integration,jetstream ./tc-server/internal/infrastructure/jetstream
+```
+
+It verifies stream creation, message publish, duplicate publish detection, and
+stored metadata headers.
+
 ## Sources
 
 - NATS JetStream: https://docs.nats.io/nats-concepts/jetstream
 - NATS JetStream streams: https://docs.nats.io/nats-concepts/jetstream/streams
 - NATS JetStream consumers: https://docs.nats.io/nats-concepts/jetstream/consumers
 - NATS JetStream headers: https://docs.nats.io/nats-concepts/jetstream/headers
+- NATS Go client: https://github.com/nats-io/nats.go

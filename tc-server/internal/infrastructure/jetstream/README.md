@@ -62,6 +62,17 @@ The first concrete implementation in this directory must add an integration
 test profile that requires a JetStream-enabled NATS service. The default
 `go test ./...` path must continue to run without external services.
 
+Current W2 bootstrap command:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d nats
+NATS_URL=nats://127.0.0.1:4222 NATS_MONITOR_URL=http://127.0.0.1:8222 go test -tags=integration,jetstream ./tests
+```
+
+The bootstrap integration test only proves that local dev NATS has JetStream
+enabled. It intentionally does not claim that the production adapter is
+implemented.
+
 ## Sources
 
 - NATS JetStream: https://docs.nats.io/nats-concepts/jetstream

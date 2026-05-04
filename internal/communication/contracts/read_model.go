@@ -35,17 +35,19 @@ type EndpointRecord struct {
 }
 
 type MessageRecord struct {
-	MessageRef        string       `json:"message_ref"`
-	DeliveryRef       string       `json:"delivery_ref"`
-	SenderEndpointRef string       `json:"sender_endpoint_ref"`
-	TargetCapability  string       `json:"target_capability"`
-	Payload           Payload      `json:"payload"`
-	Constraints       []Constraint `json:"constraints"`
-	CorrelationRef    string       `json:"correlation_ref,omitempty"`
-	ReadbackRequired  bool         `json:"readback_required"`
-	State             string       `json:"state"`
-	AttemptRef        string       `json:"attempt_ref,omitempty"`
-	RedeliveryCount   int          `json:"redelivery_count"`
+	MessageRef            string            `json:"message_ref"`
+	DeliveryRef           string            `json:"delivery_ref"`
+	SenderEndpointRef     string            `json:"sender_endpoint_ref"`
+	TargetCapability      string            `json:"target_capability"`
+	Payload               Payload           `json:"payload"`
+	Constraints           []Constraint      `json:"constraints"`
+	CorrelationRef        string            `json:"correlation_ref,omitempty"`
+	ReadbackRequired      bool              `json:"readback_required"`
+	State                 string            `json:"state"`
+	AttemptRef            string            `json:"attempt_ref,omitempty"`
+	RedeliveryCount       int               `json:"redelivery_count"`
+	QualityDecisions      []QualityDecision `json:"quality_decisions,omitempty"`
+	LatestQualityDecision *QualityDecision  `json:"latest_quality_decision,omitempty"`
 }
 
 type AttemptRecord struct {

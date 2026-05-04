@@ -126,16 +126,32 @@ func (s *Service) Messages(ctx context.Context, taskRef string) ([]contracts.Mes
 }
 
 func (s *Service) Message(ctx context.Context, ref string) (contracts.MessageRecord, bool, error) {
-	items, err := s.Messages(ctx, "")
+	snapshot, err := s.Snapshot(ctx)
 	if err != nil {
 		return contracts.MessageRecord{}, false, err
 	}
-	for _, item := range items {
+	for _, item := range snapshot.Messages {
 		if item.MessageRef == ref {
-			return item, true, nil
+			return attachQualityDecisions(item, snapshot.QualityDecisions), true, nil
 		}
 	}
 	return contracts.MessageRecord{}, false, nil
+}
+
+func attachQualityDecisions(message contracts.MessageRecord, decisions []contracts.QualityDecision) contracts.MessageRecord {
+	matching := make([]contracts.QualityDecision, 0)
+	for _, decision := range decisions {
+		if decision.MessageRef == message.MessageRef {
+			matching = append(matching, decision)
+		}
+	}
+	if len(matching) == 0 {
+		return message
+	}
+	message.QualityDecisions = matching
+	latest := matching[len(matching)-1]
+	message.LatestQualityDecision = &latest
+	return message
 }
 
 func (s *Service) Artifacts(ctx context.Context, taskRef string) ([]contracts.ArtifactRecord, error) {

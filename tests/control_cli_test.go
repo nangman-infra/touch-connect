@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nangman-infra/touch-connect/internal/communication/bridge"
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
 	tccontrol "github.com/nangman-infra/touch-connect/tc-control"
 	tcserver "github.com/nangman-infra/touch-connect/tc-server"
@@ -106,6 +108,92 @@ func TestTCCTLListsEndpointsAndSendsMessageThroughControl(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].MessageRef != sent.MessageRef {
 		t.Fatalf("expected one task message in history, got %+v", messages)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"--json",
+		"message", "inspect", sent.MessageRef,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl message inspect json failed: %v stderr=%s", err, stderr.String())
+	}
+	var inspected contracts.MessageRecord
+	if err := json.Unmarshal(stdout.Bytes(), &inspected); err != nil {
+		t.Fatalf("decode tcctl message inspect output: %v\n%s", err, stdout.String())
+	}
+	if inspected.LatestQualityDecision == nil || inspected.LatestQualityDecision.QualityDecisionRef != sent.QualityDecisionRef {
+		t.Fatalf("expected inspect to expose latest quality decision %q, got %+v", sent.QualityDecisionRef, inspected.LatestQualityDecision)
+	}
+	if len(inspected.QualityDecisions) != 1 {
+		t.Fatalf("expected inspect to include one quality decision, got %+v", inspected.QualityDecisions)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"message", "inspect", sent.MessageRef,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl message inspect failed: %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "quality=") || !strings.Contains(stdout.String(), "quality_decision="+sent.QualityDecisionRef) {
+		t.Fatalf("expected quality details in message inspect output, got %q", stdout.String())
+	}
+}
+
+func TestTouchBrowserEvidenceFlowsIntoMessageReferenceAndQualityInspect(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+	controlHTTP := httptest.NewServer(control.Handler())
+	defer controlHTTP.Close()
+
+	req := contracts.MessageIngressRequest{
+		SenderEndpointRef: "tc://endpoint/tcctl",
+		TargetCapability:  "code.change",
+		Payload: contracts.Payload{
+			Summary:    "browser-backed handoff",
+			Body:       "use grounded evidence from the browser run",
+			References: []contracts.Reference{},
+		},
+		Constraints: []contracts.Constraint{},
+	}
+	req, err = bridge.AttachTouchBrowserEvidence(req, bridge.TouchBrowserEvidence{
+		EvidenceRef: "tc://evidence/browser-live-1",
+		Title:       "Browser run evidence",
+		URL:         "https://example.test/browser-run",
+		SourceRisk:  contracts.SourceRiskHostile,
+	})
+	if err != nil {
+		t.Fatalf("attach touch-browser evidence: %v", err)
+	}
+
+	var accepted contracts.MessageIngressResponse
+	postJSON(t, controlHTTP.URL+"/v1/messages", controlHTTP.Client(), req, http.StatusAccepted, &accepted)
+
+	var inspected contracts.MessageRecord
+	getJSON(t, controlHTTP.URL+"/v1/messages/inspect?ref="+url.QueryEscape(accepted.MessageRef), controlHTTP.Client(), http.StatusOK, &inspected)
+	if len(inspected.Payload.References) != 1 {
+		t.Fatalf("expected one browser evidence reference, got %+v", inspected.Payload.References)
+	}
+	reference := inspected.Payload.References[0]
+	if reference.Type != bridge.ReferenceTypeEvidence || reference.SourceRisk != contracts.SourceRiskHostile {
+		t.Fatalf("expected hostile browser evidence source risk, got %+v", reference)
+	}
+	if inspected.LatestQualityDecision == nil || inspected.LatestQualityDecision.QualityDecisionRef != accepted.QualityDecisionRef {
+		t.Fatalf("expected inspect to include quality decision %q, got %+v", accepted.QualityDecisionRef, inspected.LatestQualityDecision)
 	}
 }
 

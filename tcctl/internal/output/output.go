@@ -65,6 +65,15 @@ func WriteMessage(w io.Writer, item contracts.MessageRecord) {
 		item.Payload.Summary,
 		item.CorrelationRef,
 	)
+	if item.LatestQualityDecision == nil {
+		fmt.Fprintln(w, "quality=none")
+		return
+	}
+	fmt.Fprintf(w, "quality=%s\nquality_decision=%s\nquality_violations=%d\n",
+		item.LatestQualityDecision.Decision,
+		item.LatestQualityDecision.QualityDecisionRef,
+		len(item.LatestQualityDecision.Violations),
+	)
 }
 
 func WriteArtifacts(w io.Writer, items []contracts.ArtifactRecord) {

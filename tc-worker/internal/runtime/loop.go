@@ -25,6 +25,8 @@ type ProcessResult struct {
 	Completed      bool
 	Blocked        bool
 	Failed         bool
+	Dropped        bool
+	DropReason     string
 }
 
 func DefaultLoopOptions() LoopOptions {
@@ -72,6 +74,17 @@ func (r *Runtime) ProcessNext(ctx context.Context) (ProcessResult, error) {
 	}
 	attemptRef, outcome, err := r.finishClaimAfterAck(ctx, claim)
 	if err != nil {
+		if drop, ok := recoverableAttemptDrop(err); ok {
+			return ProcessResult{
+				MessageRef:     claim.MessageRef,
+				AttemptRef:     claim.AttemptRef,
+				TaskRef:        taskRefForClaim(claim),
+				CorrelationRef: claim.CorrelationRef,
+				Outcome:        ExecutionOutcomeDropped,
+				Dropped:        true,
+				DropReason:     drop.Code,
+			}, nil
+		}
 		return ProcessResult{}, err
 	}
 	return ProcessResult{
@@ -116,6 +129,10 @@ func (r *Runtime) runProcessingLoop(ctx context.Context, options LoopOptions, he
 				result.Blocked,
 				result.Failed,
 			)
+			if result.Dropped {
+				log.Printf("worker dropped attempt_ref=%s message_ref=%s reason=%s", result.AttemptRef, result.MessageRef, result.DropReason)
+				continue
+			}
 			if options.MaxMessages > 0 && processed >= options.MaxMessages {
 				return nil
 			}

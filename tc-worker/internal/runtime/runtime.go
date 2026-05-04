@@ -123,11 +123,28 @@ func (r *Runtime) ProcessMessage(ctx context.Context, messageRef string) (string
 	return attemptRef, err
 }
 
-func (r *Runtime) finishClaimAfterAck(ctx context.Context, claim contracts.ClaimMessageResponse) (string, string, error) {
-	if err := r.RefreshLease(ctx, claim.AttemptRef); err != nil {
+func (r *Runtime) finishClaimAfterAck(ctx context.Context, claim contracts.ClaimMessageResponse) (attemptRef string, outcome string, err error) {
+	lease, err := r.refreshLease(ctx, claim.AttemptRef)
+	if err != nil {
 		return "", "", err
 	}
-	result, err := r.executor.Execute(ctx, executionInputFromClaim(claim))
+	executionCtx, cancelExecution := context.WithCancel(ctx)
+	keeper := r.startLeaseKeeper(ctx, claim.AttemptRef, lease.LeaseExpiresAt, cancelExecution)
+	defer func() {
+		cancelExecution()
+		if leaseErr := keeper.stop(); leaseErr != nil {
+			if drop, ok := recoverableAttemptDrop(leaseErr); ok {
+				attemptRef = claim.AttemptRef
+				outcome = ExecutionOutcomeDropped
+				err = drop
+				return
+			}
+			attemptRef = claim.AttemptRef
+			outcome = ExecutionOutcomeFailed
+			err = leaseErr
+		}
+	}()
+	result, err := r.executor.Execute(executionCtx, executionInputFromClaim(claim))
 	if err != nil {
 		failedResult := ExecutionResult{
 			Outcome:           ExecutionOutcomeFailed,
@@ -231,8 +248,12 @@ func (r *Runtime) failClaim(ctx context.Context, claim contracts.ClaimMessageRes
 }
 
 func (r *Runtime) RefreshLease(ctx context.Context, attemptRef string) error {
-	_, err := r.client.RefreshLease(ctx, attemptRef, contracts.RefreshLeaseRequest{EndpointRef: r.config.EndpointRef})
+	_, err := r.refreshLease(ctx, attemptRef)
 	return err
+}
+
+func (r *Runtime) refreshLease(ctx context.Context, attemptRef string) (contracts.RefreshLeaseResponse, error) {
+	return r.client.RefreshLease(ctx, attemptRef, contracts.RefreshLeaseRequest{EndpointRef: r.config.EndpointRef})
 }
 
 func (r *Runtime) RegisterArtifactVersion(ctx context.Context, attemptRef string, req contracts.ArtifactVersionRequest) (contracts.ArtifactVersionResponse, error) {

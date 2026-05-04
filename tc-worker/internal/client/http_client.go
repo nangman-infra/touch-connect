@@ -128,8 +128,16 @@ func (c *HTTPClient) get(ctx context.Context, path string, target any) error {
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		var apiErr contracts.ErrorResponse
-		_ = json.NewDecoder(res.Body).Decode(&apiErr)
-		return fmt.Errorf("server rejected request: status=%d code=%s message=%s", res.StatusCode, apiErr.Code, apiErr.Message)
+		if err := json.NewDecoder(res.Body).Decode(&apiErr); err == nil && apiErr.Code != "" {
+			return contracts.APIError{StatusCode: res.StatusCode, Response: apiErr}
+		}
+		return contracts.APIError{
+			StatusCode: res.StatusCode,
+			Response: contracts.ErrorResponse{
+				Code:    fmt.Sprintf("server_status_%d", res.StatusCode),
+				Message: fmt.Sprintf("server returned status %d", res.StatusCode),
+			},
+		}
 	}
 	return json.NewDecoder(res.Body).Decode(target)
 }
@@ -151,8 +159,16 @@ func (c *HTTPClient) post(ctx context.Context, path string, body any, target any
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		var apiErr contracts.ErrorResponse
-		_ = json.NewDecoder(res.Body).Decode(&apiErr)
-		return fmt.Errorf("server rejected request: status=%d code=%s message=%s", res.StatusCode, apiErr.Code, apiErr.Message)
+		if err := json.NewDecoder(res.Body).Decode(&apiErr); err == nil && apiErr.Code != "" {
+			return contracts.APIError{StatusCode: res.StatusCode, Response: apiErr}
+		}
+		return contracts.APIError{
+			StatusCode: res.StatusCode,
+			Response: contracts.ErrorResponse{
+				Code:    fmt.Sprintf("server_status_%d", res.StatusCode),
+				Message: fmt.Sprintf("server returned status %d", res.StatusCode),
+			},
+		}
 	}
 	return json.NewDecoder(res.Body).Decode(target)
 }

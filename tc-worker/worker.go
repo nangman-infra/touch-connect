@@ -33,6 +33,7 @@ const (
 	ExecutionOutcomeCompleted     = runtime.ExecutionOutcomeCompleted
 	ExecutionOutcomeMissingFields = runtime.ExecutionOutcomeMissingFields
 	ExecutionOutcomeFailed        = runtime.ExecutionOutcomeFailed
+	ExecutionOutcomeDropped       = runtime.ExecutionOutcomeDropped
 )
 
 func NewHTTPRuntime(serverURL string, httpClient *http.Client, config Config) *runtime.Runtime {

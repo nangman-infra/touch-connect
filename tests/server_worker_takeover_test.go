@@ -151,6 +151,31 @@ func TestOnlyOneWorkerCanTakeOverExpiredClaim(t *testing.T) {
 	}
 }
 
+func TestBackgroundReconcileMarksExpiredClaimWithoutPollingWorker(t *testing.T) {
+	server, httpServer := newLeaseTestServer(t, 5*time.Millisecond, 3)
+	defer httpServer.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := server.StartBackgroundReconcile(ctx, time.Millisecond)
+	defer func() {
+		cancel()
+		<-done
+	}()
+	firstConfig := tcworker.DefaultConfig()
+	registerWorkers(t, httpServer, firstConfig)
+	message := ingressMessage(t, httpServer.URL, httpServer.Client(), false)
+	firstClaim := claimMessage(t, httpServer.URL, httpServer.Client(), message.MessageRef, firstConfig.EndpointRef, http.StatusAccepted)
+	checkpointAttempt(t, httpServer, firstClaim.AttemptRef, firstConfig.EndpointRef, "in_progress", http.StatusAccepted)
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if snapshot := server.Snapshot(); snapshot.Messages[0].State == "takeover_candidate" {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("expected background reconcile to mark takeover_candidate, got %+v", server.Snapshot())
+}
+
 func newLeaseTestServer(t *testing.T, lease time.Duration, maxRedelivery int) (*tcserver.Server, *httptest.Server) {
 	t.Helper()
 	settings := tcserver.DefaultSettings()

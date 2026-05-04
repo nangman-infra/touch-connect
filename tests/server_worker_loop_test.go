@@ -115,6 +115,44 @@ func TestClaimNextTakesOverExpiredClaim(t *testing.T) {
 	}
 }
 
+func TestWorkerRefreshesLeaseDuringLongExecution(t *testing.T) {
+	settings := tcserver.DefaultSettings()
+	settings.AttemptLeaseDuration = 30 * time.Millisecond
+	server, err := tcserver.NewInMemoryServerWithSettings(settings)
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	executor := executorFunc(func(ctx context.Context, _ tcworker.ExecutionInput) (tcworker.ExecutionResult, error) {
+		select {
+		case <-ctx.Done():
+			return tcworker.ExecutionResult{}, ctx.Err()
+		case <-time.After(90 * time.Millisecond):
+			return tcworker.ExecutionResult{
+				Outcome: tcworker.ExecutionOutcomeCompleted,
+				Summary: "long execution completed with lease refresh",
+			}, nil
+		}
+	})
+	worker := tcworker.NewHTTPRuntimeWithExecutor(httpServer.URL, httpServer.Client(), tcworker.DefaultConfig(), executor)
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	message := ingressMessage(t, httpServer.URL, httpServer.Client(), false)
+
+	result, err := worker.ProcessNext(context.Background())
+	if err != nil {
+		t.Fatalf("process long execution: %v", err)
+	}
+	if !result.Completed || result.MessageRef != message.MessageRef {
+		t.Fatalf("expected long execution to complete, got %+v", result)
+	}
+	if snapshot := server.Snapshot(); snapshot.Messages[0].State != "completed" || snapshot.Attempts[0].State != "completed" {
+		t.Fatalf("expected completed message and attempt after long execution, got %+v", snapshot)
+	}
+}
+
 func TestWorkerExecutorCanBlockForMissingFields(t *testing.T) {
 	server := tcserver.NewInMemoryServer()
 	httpServer := httptest.NewServer(server.Handler())

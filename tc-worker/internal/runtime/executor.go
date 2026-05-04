@@ -12,6 +12,7 @@ const (
 	ExecutionOutcomeCompleted     = "completed"
 	ExecutionOutcomeMissingFields = "missing_fields"
 	ExecutionOutcomeFailed        = "failed"
+	ExecutionOutcomeDropped       = "dropped"
 )
 
 type WorkerExecutor interface {

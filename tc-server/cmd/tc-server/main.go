@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -47,6 +48,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	reconcileCtx, stopReconcile := context.WithCancel(context.Background())
+	defer stopReconcile()
+	server.StartBackgroundReconcile(reconcileCtx, 0)
 	log.Printf("tc-server listening on %s version=%s storage=%s", cfg.BindAddr, cfg.Settings.Version, cfg.Storage)
 	if err := http.ListenAndServe(cfg.BindAddr, server.Handler()); err != nil {
 		log.Fatal(err)

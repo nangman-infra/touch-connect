@@ -1,8 +1,10 @@
 package tcserver
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/nangman-infra/touch-connect/tc-server/internal/adapters/api"
 	"github.com/nangman-infra/touch-connect/tc-server/internal/application"
@@ -12,8 +14,9 @@ import (
 )
 
 type Server struct {
-	service *application.Service
-	handler http.Handler
+	service  *application.Service
+	handler  http.Handler
+	settings application.Settings
 }
 
 type Settings = application.Settings
@@ -60,8 +63,9 @@ func NewServerWithPortsAndDeliveryAdapter(endpoints application.EndpointRegistry
 		return nil, err
 	}
 	return &Server{
-		service: service,
-		handler: api.NewHandler(service),
+		service:  service,
+		handler:  api.NewHandler(service),
+		settings: settings,
 	}, nil
 }
 
@@ -75,4 +79,28 @@ func (s *Server) Snapshot() domain.Snapshot {
 
 func (s *Server) ReconcileExpiredClaims() int {
 	return s.service.ReconcileExpiredClaims()
+}
+
+func (s *Server) StartBackgroundReconcile(ctx context.Context, interval time.Duration) <-chan struct{} {
+	if interval <= 0 {
+		interval = s.settings.AttemptLeaseDuration / 2
+	}
+	if interval <= 0 {
+		interval = time.Second
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.ReconcileExpiredClaims()
+			}
+		}
+	}()
+	return done
 }

@@ -48,11 +48,15 @@ func NewServerWithStore(store application.Store, settings application.Settings) 
 	if !ok {
 		return nil, errors.New("store must provide ref allocator")
 	}
-	return NewServerWithPorts(store, refs, settings)
+	projections, ok := store.(application.ProjectionReader)
+	if !ok {
+		return nil, errors.New("store must provide projection reader")
+	}
+	return NewServerWithPorts(store, refs, projections, settings)
 }
 
-func NewServerWithPorts(store application.Store, refs application.RefAllocator, settings application.Settings) (*Server, error) {
-	service, err := application.NewService(store, refs, settings)
+func NewServerWithPorts(store application.Store, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
+	service, err := application.NewService(store, refs, projections, settings)
 	if err != nil {
 		return nil, err
 	}

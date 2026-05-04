@@ -10,23 +10,27 @@ import (
 )
 
 type Service struct {
-	store    Store
-	refs     RefAllocator
-	settings Settings
+	store       Store
+	refs        RefAllocator
+	projections ProjectionReader
+	settings    Settings
 }
 
-func NewService(store Store, refs RefAllocator, settings Settings) (*Service, error) {
+func NewService(store Store, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("store is required")
 	}
 	if refs == nil {
 		return nil, errors.New("ref allocator is required")
 	}
+	if projections == nil {
+		return nil, errors.New("projection reader is required")
+	}
 	accepted, err := settings.Validated()
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, refs: refs, settings: accepted}, nil
+	return &Service{store: store, refs: refs, projections: projections, settings: accepted}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {
@@ -342,7 +346,7 @@ func (s *Service) CompleteAttempt(attemptRef string, req contracts.CompleteAttem
 }
 
 func (s *Service) Snapshot() domain.Snapshot {
-	snapshot := s.store.Snapshot()
+	snapshot := s.projections.Snapshot()
 	for index := range snapshot.Endpoints {
 		endpoint := snapshot.Endpoints[index]
 		if endpoint.ConnectionState == domain.EndpointStateOnline && s.endpointIsStale(endpoint) {

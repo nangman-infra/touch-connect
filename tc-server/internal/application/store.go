@@ -33,9 +33,12 @@ type Store interface {
 	GetSideEffectExecution(executionRef string) (domain.SideEffectExecution, bool)
 	UpdateSideEffectExecution(execution domain.SideEffectExecution) error
 	ReconcileExpiredClaims(now time.Time) int
-	Snapshot() domain.Snapshot
 }
 
 type RefAllocator interface {
 	NextRef(kind string) string
+}
+
+type ProjectionReader interface {
+	Snapshot() domain.Snapshot
 }

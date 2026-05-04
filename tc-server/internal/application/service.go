@@ -11,14 +11,22 @@ import (
 
 type Service struct {
 	store       Store
+	endpoints   EndpointRegistry
+	messages    MessageLedger
 	refs        RefAllocator
 	projections ProjectionReader
 	settings    Settings
 }
 
-func NewService(store Store, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
+func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("store is required")
+	}
+	if endpoints == nil {
+		return nil, errors.New("endpoint registry is required")
+	}
+	if messages == nil {
+		return nil, errors.New("message ledger is required")
 	}
 	if refs == nil {
 		return nil, errors.New("ref allocator is required")
@@ -30,7 +38,7 @@ func NewService(store Store, refs RefAllocator, projections ProjectionReader, se
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, refs: refs, projections: projections, settings: accepted}, nil
+	return &Service{store: store, endpoints: endpoints, messages: messages, refs: refs, projections: projections, settings: accepted}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {
@@ -62,7 +70,7 @@ func (s *Service) RegisterEndpoint(req contracts.EndpointRegistrationRequest) (c
 		RegisteredAt:    s.now(),
 		LastHeartbeatAt: s.now(),
 	}
-	if err := s.store.SaveEndpoint(endpoint); err != nil {
+	if err := s.endpoints.SaveEndpoint(endpoint); err != nil {
 		return contracts.EndpointRegistrationResponse{}, err
 	}
 	return contracts.EndpointRegistrationResponse{
@@ -81,14 +89,14 @@ func (s *Service) HeartbeatEndpoint(endpointRef string, req contracts.EndpointHe
 	if err := domain.ValidateHeartbeat(req); err != nil {
 		return contracts.EndpointHeartbeatResponse{}, err
 	}
-	endpoint, ok := s.store.GetEndpoint(endpointRef)
+	endpoint, ok := s.endpoints.GetEndpoint(endpointRef)
 	if !ok {
 		return contracts.EndpointHeartbeatResponse{}, domain.ErrEndpointNotFound
 	}
 	now := s.now()
 	endpoint.ConnectionState = req.ConnectionState
 	endpoint.LastHeartbeatAt = now
-	if err := s.store.UpdateEndpoint(endpoint); err != nil {
+	if err := s.endpoints.UpdateEndpoint(endpoint); err != nil {
 		return contracts.EndpointHeartbeatResponse{}, err
 	}
 	return contracts.EndpointHeartbeatResponse{
@@ -103,7 +111,7 @@ func (s *Service) AdvertiseCapabilities(endpointRef string, req contracts.Capabi
 	if err := domain.ValidateCapabilities(req.Capabilities); err != nil {
 		return contracts.CapabilityAdvertisementResponse{}, err
 	}
-	endpoint, err := s.store.UpdateCapabilities(endpointRef, capabilityMap(req.Capabilities))
+	endpoint, err := s.endpoints.UpdateCapabilities(endpointRef, capabilityMap(req.Capabilities))
 	if err != nil {
 		return contracts.CapabilityAdvertisementResponse{}, err
 	}
@@ -117,7 +125,7 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 	if err := domain.ValidateMessage(req); err != nil {
 		return contracts.MessageIngressResponse{}, err
 	}
-	if len(s.store.CapabilityEndpoints(req.TargetCapability)) == 0 {
+	if len(s.endpoints.CapabilityEndpoints(req.TargetCapability)) == 0 {
 		return contracts.MessageIngressResponse{}, domain.ErrCapabilityNotFound
 	}
 	messageRef := req.MessageRef
@@ -135,7 +143,7 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 		ReadbackRequired:  req.ReadbackRequired,
 		State:             domain.MessageStateAvailable,
 	}
-	if err := s.store.SaveMessage(message); err != nil {
+	if err := s.messages.SaveMessage(message); err != nil {
 		return contracts.MessageIngressResponse{}, err
 	}
 	return contracts.MessageIngressResponse{
@@ -146,11 +154,11 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 }
 
 func (s *Service) ClaimMessage(messageRef string, req contracts.ClaimMessageRequest) (contracts.ClaimMessageResponse, error) {
-	endpoint, ok := s.store.GetEndpoint(req.EndpointRef)
+	endpoint, ok := s.endpoints.GetEndpoint(req.EndpointRef)
 	if !ok {
 		return contracts.ClaimMessageResponse{}, domain.ErrEndpointNotFound
 	}
-	message, ok := s.store.GetMessage(messageRef)
+	message, ok := s.messages.GetMessage(messageRef)
 	if !ok {
 		return contracts.ClaimMessageResponse{}, domain.ErrMessageNotFound
 	}
@@ -177,7 +185,7 @@ func (s *Service) ClaimMessage(messageRef string, req contracts.ClaimMessageRequ
 }
 
 func (s *Service) ClaimNextMessage(req contracts.ClaimNextMessageRequest) (contracts.ClaimNextMessageResponse, error) {
-	endpoint, ok := s.store.GetEndpoint(req.EndpointRef)
+	endpoint, ok := s.endpoints.GetEndpoint(req.EndpointRef)
 	if !ok {
 		return contracts.ClaimNextMessageResponse{}, domain.ErrEndpointNotFound
 	}
@@ -334,12 +342,12 @@ func (s *Service) CompleteAttempt(attemptRef string, req contracts.CompleteAttem
 	}
 	attempt, _ = s.store.GetAttempt(attemptRef)
 	attempt.State = domain.AttemptStateCompleted
-	message, _ := s.store.GetMessage(attempt.MessageRef)
+	message, _ := s.messages.GetMessage(attempt.MessageRef)
 	message.State = domain.MessageStateCompleted
 	if err := s.store.UpdateAttempt(attempt); err != nil {
 		return contracts.CompleteAttemptResponse{}, err
 	}
-	if err := s.store.UpdateMessage(message); err != nil {
+	if err := s.messages.UpdateMessage(message); err != nil {
 		return contracts.CompleteAttemptResponse{}, err
 	}
 	return contracts.CompleteAttemptResponse{AttemptRef: attempt.AttemptRef, State: attempt.State}, nil
@@ -376,7 +384,7 @@ func (s *Service) leaseExpired(attempt domain.Attempt) bool {
 }
 
 func (s *Service) updateMessageStateForCheckpoint(messageRef string, attemptState string) error {
-	message, ok := s.store.GetMessage(messageRef)
+	message, ok := s.messages.GetMessage(messageRef)
 	if !ok {
 		return domain.ErrMessageNotFound
 	}
@@ -390,7 +398,7 @@ func (s *Service) updateMessageStateForCheckpoint(messageRef string, attemptStat
 	case domain.AttemptStateCompleted:
 		message.State = domain.MessageStateCompleted
 	}
-	return s.store.UpdateMessage(message)
+	return s.messages.UpdateMessage(message)
 }
 
 func capabilityMap(items []contracts.Capability) map[string]contracts.Capability {

@@ -60,7 +60,7 @@ func (s *Service) StartSideEffectExecution(attemptRef string, req contracts.Side
 	if err != nil {
 		return contracts.SideEffectExecutionResponse{}, err
 	}
-	endpoint, ok := s.store.GetEndpoint(req.EndpointRef)
+	endpoint, ok := s.endpoints.GetEndpoint(req.EndpointRef)
 	if !ok {
 		return contracts.SideEffectExecutionResponse{}, domain.ErrEndpointNotFound
 	}

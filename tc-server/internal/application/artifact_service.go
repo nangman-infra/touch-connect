@@ -13,11 +13,11 @@ func (s *Service) RegisterArtifactVersion(attemptRef string, req contracts.Artif
 	if err != nil {
 		return contracts.ArtifactVersionResponse{}, err
 	}
-	endpoint, ok := s.store.GetEndpoint(req.EndpointRef)
+	endpoint, ok := s.endpoints.GetEndpoint(req.EndpointRef)
 	if !ok {
 		return contracts.ArtifactVersionResponse{}, domain.ErrEndpointNotFound
 	}
-	if _, ok := s.store.GetMessage(attempt.MessageRef); !ok {
+	if _, ok := s.messages.GetMessage(attempt.MessageRef); !ok {
 		return contracts.ArtifactVersionResponse{}, domain.ErrMessageNotFound
 	}
 	for _, ref := range req.BasedOnArtifactVersionRefs {

@@ -52,11 +52,19 @@ func NewServerWithStore(store application.Store, settings application.Settings) 
 	if !ok {
 		return nil, errors.New("store must provide projection reader")
 	}
-	return NewServerWithPorts(store, refs, projections, settings)
+	endpoints, ok := store.(application.EndpointRegistry)
+	if !ok {
+		return nil, errors.New("store must provide endpoint registry")
+	}
+	messages, ok := store.(application.MessageLedger)
+	if !ok {
+		return nil, errors.New("store must provide message ledger")
+	}
+	return NewServerWithPorts(store, endpoints, messages, refs, projections, settings)
 }
 
-func NewServerWithPorts(store application.Store, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
-	service, err := application.NewService(store, refs, projections, settings)
+func NewServerWithPorts(store application.Store, endpoints application.EndpointRegistry, messages application.MessageLedger, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
+	service, err := application.NewService(store, endpoints, messages, refs, projections, settings)
 	if err != nil {
 		return nil, err
 	}

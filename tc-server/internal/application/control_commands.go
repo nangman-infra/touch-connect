@@ -19,7 +19,7 @@ func (s *Service) CancelTask(req contracts.TaskCommandRequest) (contracts.TaskCo
 			continue
 		}
 		message.State = domain.MessageStateCanceled
-		if err := s.store.UpdateMessage(message); err != nil {
+		if err := s.messages.UpdateMessage(message); err != nil {
 			return contracts.TaskCommandResponse{}, err
 		}
 		response.MessageRefs = append(response.MessageRefs, message.MessageRef)
@@ -56,7 +56,7 @@ func (s *Service) RetryTask(req contracts.TaskCommandRequest) (contracts.TaskCom
 		}
 		message.State = domain.MessageStateAvailable
 		message.AttemptRef = ""
-		if err := s.store.UpdateMessage(message); err != nil {
+		if err := s.messages.UpdateMessage(message); err != nil {
 			return contracts.TaskCommandResponse{}, err
 		}
 		response.MessageRefs = append(response.MessageRefs, message.MessageRef)
@@ -73,7 +73,7 @@ func (s *Service) ReplayDeadLetter(req contracts.DLQReplayRequest) (contracts.DL
 	if !ok {
 		return contracts.DLQReplayResponse{}, domain.ErrMessageNotFound
 	}
-	original, ok := s.store.GetMessage(deadLetter.MessageRef)
+	original, ok := s.messages.GetMessage(deadLetter.MessageRef)
 	if !ok {
 		return contracts.DLQReplayResponse{}, domain.ErrMessageNotFound
 	}

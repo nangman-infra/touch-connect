@@ -8,14 +8,6 @@ import (
 )
 
 type Store interface {
-	SaveEndpoint(endpoint domain.Endpoint) error
-	GetEndpoint(endpointRef string) (domain.Endpoint, bool)
-	UpdateCapabilities(endpointRef string, capabilities map[string]contracts.Capability) (domain.Endpoint, error)
-	UpdateEndpoint(endpoint domain.Endpoint) error
-	CapabilityEndpoints(capability string) []domain.Endpoint
-	SaveMessage(message domain.Message) error
-	GetMessage(messageRef string) (domain.Message, bool)
-	UpdateMessage(message domain.Message) error
 	ClaimMessage(claim domain.ClaimRequest) (domain.ClaimResult, error)
 	ClaimNextMessage(claim domain.ClaimNextRequest) (domain.ClaimResult, bool, error)
 	SaveAttempt(attempt domain.Attempt) error
@@ -33,6 +25,20 @@ type Store interface {
 	GetSideEffectExecution(executionRef string) (domain.SideEffectExecution, bool)
 	UpdateSideEffectExecution(execution domain.SideEffectExecution) error
 	ReconcileExpiredClaims(now time.Time) int
+}
+
+type EndpointRegistry interface {
+	SaveEndpoint(endpoint domain.Endpoint) error
+	GetEndpoint(endpointRef string) (domain.Endpoint, bool)
+	UpdateCapabilities(endpointRef string, capabilities map[string]contracts.Capability) (domain.Endpoint, error)
+	UpdateEndpoint(endpoint domain.Endpoint) error
+	CapabilityEndpoints(capability string) []domain.Endpoint
+}
+
+type MessageLedger interface {
+	SaveMessage(message domain.Message) error
+	GetMessage(messageRef string) (domain.Message, bool)
+	UpdateMessage(message domain.Message) error
 }
 
 type RefAllocator interface {

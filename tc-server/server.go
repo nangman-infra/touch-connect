@@ -44,31 +44,14 @@ func NewSQLiteServer(path string, settings application.Settings) (*Server, error
 }
 
 func NewServerWithStore(store application.Store, settings application.Settings) (*Server, error) {
-	refs, ok := store.(application.RefAllocator)
-	if !ok {
-		return nil, errors.New("store must provide ref allocator")
+	if store == nil {
+		return nil, errors.New("store is required")
 	}
-	projections, ok := store.(application.ProjectionReader)
-	if !ok {
-		return nil, errors.New("store must provide projection reader")
-	}
-	endpoints, ok := store.(application.EndpointRegistry)
-	if !ok {
-		return nil, errors.New("store must provide endpoint registry")
-	}
-	messages, ok := store.(application.MessageLedger)
-	if !ok {
-		return nil, errors.New("store must provide message ledger")
-	}
-	processing, ok := store.(application.ProcessingLedger)
-	if !ok {
-		return nil, errors.New("store must provide processing ledger")
-	}
-	return NewServerWithPorts(store, endpoints, messages, processing, refs, projections, settings)
+	return NewServerWithPorts(store, store, store, store, store, store, store, store, settings)
 }
 
-func NewServerWithPorts(store application.Store, endpoints application.EndpointRegistry, messages application.MessageLedger, processing application.ProcessingLedger, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
-	service, err := application.NewService(store, endpoints, messages, processing, refs, projections, settings)
+func NewServerWithPorts(endpoints application.EndpointRegistry, messages application.MessageLedger, processing application.ProcessingLedger, readbacks application.ReadbackLedger, artifacts application.ArtifactLedger, governance application.GovernanceLedger, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
+	service, err := application.NewService(endpoints, messages, processing, readbacks, artifacts, governance, refs, projections, settings)
 	if err != nil {
 		return nil, err
 	}

@@ -9,10 +9,10 @@ func (s *Service) FinalizeArtifact(req contracts.ArtifactFinalizeRequest) (contr
 	if req.ArtifactVersionRef == "" || req.ActorID == "" {
 		return contracts.ArtifactFinalizeResponse{}, domain.ErrInvalidInput
 	}
-	if _, ok := s.store.GetArtifactVersion(req.ArtifactVersionRef); !ok {
+	if _, ok := s.artifacts.GetArtifactVersion(req.ArtifactVersionRef); !ok {
 		return contracts.ArtifactFinalizeResponse{}, domain.ErrArtifactNotFound
 	}
-	if existing, ok := s.store.GetArtifactFinalization(req.ArtifactVersionRef); ok {
+	if existing, ok := s.artifacts.GetArtifactFinalization(req.ArtifactVersionRef); ok {
 		return artifactFinalizeResponse(existing, true), nil
 	}
 	finalization := domain.ArtifactFinalization{
@@ -22,7 +22,7 @@ func (s *Service) FinalizeArtifact(req contracts.ArtifactFinalizeRequest) (contr
 		Reason:             req.Reason,
 		FinalizedAt:        s.now(),
 	}
-	if err := s.store.SaveArtifactFinalization(finalization); err != nil {
+	if err := s.artifacts.SaveArtifactFinalization(finalization); err != nil {
 		return contracts.ArtifactFinalizeResponse{}, err
 	}
 	return artifactFinalizeResponse(finalization, false), nil

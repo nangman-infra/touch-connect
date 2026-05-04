@@ -39,7 +39,7 @@ func (s *Service) RecordApprovalDecision(attemptRef string, req contracts.Approv
 	if req.Status != domain.ApprovalStatusPending {
 		decision.DecidedAt = s.now()
 	}
-	if err := s.store.SaveApprovalDecision(decision); err != nil {
+	if err := s.governance.SaveApprovalDecision(decision); err != nil {
 		return contracts.ApprovalDecisionResponse{}, err
 	}
 	return contracts.ApprovalDecisionResponse{
@@ -85,7 +85,7 @@ func (s *Service) StartSideEffectExecution(attemptRef string, req contracts.Side
 		Status:                 domain.SideEffectStatusExecuting,
 		StartedAt:              s.now(),
 	}
-	accepted, deduped, err := s.store.SaveSideEffectExecution(execution)
+	accepted, deduped, err := s.governance.SaveSideEffectExecution(execution)
 	if err != nil {
 		return contracts.SideEffectExecutionResponse{}, err
 	}
@@ -106,7 +106,7 @@ func (s *Service) CompleteSideEffectExecution(executionRef string, req contracts
 	if err := domain.ValidateSideEffectCompletion(req); err != nil {
 		return contracts.CompleteSideEffectExecutionResponse{}, err
 	}
-	execution, ok := s.store.GetSideEffectExecution(executionRef)
+	execution, ok := s.governance.GetSideEffectExecution(executionRef)
 	if !ok {
 		return contracts.CompleteSideEffectExecutionResponse{}, domain.ErrSideEffectNotFound
 	}
@@ -120,7 +120,7 @@ func (s *Service) CompleteSideEffectExecution(executionRef string, req contracts
 	execution.ResultRef = req.ResultRef
 	execution.FailureReasonCode = req.FailureReasonCode
 	execution.CompletedAt = s.now()
-	if err := s.store.UpdateSideEffectExecution(execution); err != nil {
+	if err := s.governance.UpdateSideEffectExecution(execution); err != nil {
 		return contracts.CompleteSideEffectExecutionResponse{}, err
 	}
 	return contracts.CompleteSideEffectExecutionResponse{
@@ -131,7 +131,7 @@ func (s *Service) CompleteSideEffectExecution(executionRef string, req contracts
 }
 
 func (s *Service) requireApprovedDecision(attempt domain.Attempt, req contracts.SideEffectExecutionRequest) (domain.ApprovalDecision, error) {
-	approval, ok := s.store.GetApprovalDecision(req.ApprovalRef)
+	approval, ok := s.governance.GetApprovalDecision(req.ApprovalRef)
 	if !ok {
 		return domain.ApprovalDecision{}, domain.ErrApprovalRequired
 	}

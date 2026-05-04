@@ -10,19 +10,18 @@ import (
 )
 
 type Service struct {
-	store       Store
 	endpoints   EndpointRegistry
 	messages    MessageLedger
 	processing  ProcessingLedger
+	readbacks   ReadbackLedger
+	artifacts   ArtifactLedger
+	governance  GovernanceLedger
 	refs        RefAllocator
 	projections ProjectionReader
 	settings    Settings
 }
 
-func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
-	if store == nil {
-		return nil, errors.New("store is required")
-	}
+func NewService(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
 	if endpoints == nil {
 		return nil, errors.New("endpoint registry is required")
 	}
@@ -31,6 +30,15 @@ func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger,
 	}
 	if processing == nil {
 		return nil, errors.New("processing ledger is required")
+	}
+	if readbacks == nil {
+		return nil, errors.New("readback ledger is required")
+	}
+	if artifacts == nil {
+		return nil, errors.New("artifact ledger is required")
+	}
+	if governance == nil {
+		return nil, errors.New("governance ledger is required")
 	}
 	if refs == nil {
 		return nil, errors.New("ref allocator is required")
@@ -42,7 +50,7 @@ func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger,
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, endpoints: endpoints, messages: messages, processing: processing, refs: refs, projections: projections, settings: accepted}, nil
+	return &Service{endpoints: endpoints, messages: messages, processing: processing, readbacks: readbacks, artifacts: artifacts, governance: governance, refs: refs, projections: projections, settings: accepted}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {
@@ -289,7 +297,7 @@ func (s *Service) SubmitReadback(attemptRef string, req contracts.ReadbackReques
 		MissingFields:  req.MissingFields,
 		MissingReasons: req.MissingReasons,
 	}
-	accepted, err := s.store.SaveReadback(readback)
+	accepted, err := s.readbacks.SaveReadback(readback)
 	if err != nil {
 		return contracts.ReadbackResponse{}, err
 	}

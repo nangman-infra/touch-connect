@@ -8,11 +8,28 @@ import (
 )
 
 type Store interface {
+	EndpointRegistry
+	MessageLedger
+	ProcessingLedger
+	ReadbackLedger
+	ArtifactLedger
+	GovernanceLedger
+	RefAllocator
+	ProjectionReader
+}
+
+type ReadbackLedger interface {
 	SaveReadback(readback domain.Readback) (domain.Readback, error)
+}
+
+type ArtifactLedger interface {
 	SaveArtifactVersion(version domain.ArtifactVersion) error
 	GetArtifactVersion(artifactVersionRef string) (domain.ArtifactVersion, bool)
 	SaveArtifactFinalization(finalization domain.ArtifactFinalization) error
 	GetArtifactFinalization(artifactVersionRef string) (domain.ArtifactFinalization, bool)
+}
+
+type GovernanceLedger interface {
 	SaveApprovalDecision(decision domain.ApprovalDecision) error
 	GetApprovalDecision(approvalRef string) (domain.ApprovalDecision, bool)
 	SaveSideEffectExecution(execution domain.SideEffectExecution) (domain.SideEffectExecution, bool, error)

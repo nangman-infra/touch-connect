@@ -21,7 +21,7 @@ func (s *Service) RegisterArtifactVersion(attemptRef string, req contracts.Artif
 		return contracts.ArtifactVersionResponse{}, domain.ErrMessageNotFound
 	}
 	for _, ref := range req.BasedOnArtifactVersionRefs {
-		if _, ok := s.store.GetArtifactVersion(ref); !ok {
+		if _, ok := s.artifacts.GetArtifactVersion(ref); !ok {
 			return contracts.ArtifactVersionResponse{}, domain.ErrArtifactNotFound
 		}
 	}
@@ -46,7 +46,7 @@ func (s *Service) RegisterArtifactVersion(attemptRef string, req contracts.Artif
 		AttemptRef:                 attempt.AttemptRef,
 		CreatedAt:                  s.now(),
 	}
-	if err := s.store.SaveArtifactVersion(version); err != nil {
+	if err := s.artifacts.SaveArtifactVersion(version); err != nil {
 		return contracts.ArtifactVersionResponse{}, err
 	}
 	return contracts.ArtifactVersionResponse{
@@ -61,7 +61,7 @@ func (s *Service) RegisterArtifactVersion(attemptRef string, req contracts.Artif
 
 func (s *Service) validateCheckpointArtifactRefs(attempt domain.Attempt, artifactRefs []string) error {
 	for _, ref := range artifactRefs {
-		version, ok := s.store.GetArtifactVersion(ref)
+		version, ok := s.artifacts.GetArtifactVersion(ref)
 		if !ok {
 			return domain.ErrArtifactNotFound
 		}

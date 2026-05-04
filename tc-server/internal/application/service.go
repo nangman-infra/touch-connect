@@ -165,18 +165,18 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 		ReadbackRequired:  req.ReadbackRequired,
 		State:             domain.MessageStateAvailable,
 	}
-	qualityDecision := quality.ValidateMessage(quality.ValidationInput{
+	qualityDecision := quality.ValidateMessageWithGate(quality.ValidationInput{
 		DecisionRef: s.refs.NextRef("quality-decision"),
 		MessageRef:  message.MessageRef,
 		Request:     req,
 		CreatedAt:   s.now(),
 		CreatedBy:   req.SenderEndpointRef,
-	})
+	}, req.QualityGate)
 	if err := s.quality.SaveQualityDecision(qualityDecision); err != nil {
 		return contracts.MessageIngressResponse{}, err
 	}
 	if qualityDecision.Decision == contracts.QualityDecisionRejected {
-		return contracts.MessageIngressResponse{}, domain.ErrInvalidInput
+		return contracts.MessageIngressResponse{}, QualityRejectedError{Decision: qualityDecision}
 	}
 	if err := s.messages.SaveMessage(message); err != nil {
 		return contracts.MessageIngressResponse{}, err

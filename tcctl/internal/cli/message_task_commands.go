@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -54,9 +55,14 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 	taskRef := flags.String("task", "", "task/correlation ref")
 	messageRef := flags.String("message-ref", "", "optional message ref")
 	readbackRequired := flags.Bool("readback-required", false, "require worker readback")
+	qualityGate := flags.String("quality-gate", contracts.QualityGateEnforce.String(), "quality gate mode: enforce, warn, or skip")
 	constraint := flags.String("constraint", "", "optional code:summary constraint")
 	if err := parseCommandFlags(flags, args); err != nil {
 		return err
+	}
+	gate, err := contracts.ParseQualityGateMode(*qualityGate)
+	if err != nil {
+		return usageError(err)
 	}
 	if *capability == "" || *summary == "" || *body == "" {
 		flags.Usage()
@@ -68,6 +74,7 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 		TargetCapability:  *capability,
 		CorrelationRef:    *taskRef,
 		ReadbackRequired:  *readbackRequired,
+		QualityGate:       gate,
 		Constraints:       []contracts.Constraint{},
 		Payload: contracts.Payload{
 			Summary:    *summary,
@@ -80,13 +87,26 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 	}
 	value, err := r.client.SendMessage(ctx, req)
 	if err != nil {
-		return unavailableError(err)
+		return messageSendError(err, r.stderr)
 	}
 	if r.config.JSON {
 		return output.WriteJSON(r.stdout, value)
 	}
 	fmt.Fprintf(r.stdout, "%s\t%s\t%s\n", value.MessageRef, value.State, value.DeliveryRef)
 	return nil
+}
+
+func messageSendError(err error, stderr io.Writer) error {
+	var apiErr contracts.APIError
+	if errors.As(err, &apiErr) && apiErr.Response.Code == contracts.ErrorCodeQualityRejected && apiErr.Response.QualityDecision != nil {
+		decision := apiErr.Response.QualityDecision
+		fmt.Fprintf(stderr, "quality gate rejected %s decision=%s\n", decision.QualityDecisionRef, decision.Decision)
+		for _, violation := range decision.Violations {
+			fmt.Fprintf(stderr, "- %s field=%s severity=%s: %s\n", violation.Code, violation.Field, violation.Severity, violation.Detail)
+		}
+		return commandError(err)
+	}
+	return unavailableError(err)
 }
 
 func (r Runtime) listMessages(ctx context.Context, args []string) error {

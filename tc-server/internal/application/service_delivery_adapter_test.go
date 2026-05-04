@@ -124,8 +124,11 @@ func TestServiceRecordsRejectedQualityDecisionWithoutDispatch(t *testing.T) {
 		Severity:       contracts.QualitySeverityBlocking,
 	}
 
-	if _, err := service.IngressMessage(req); !errors.Is(err, domain.ErrInvalidInput) {
+	var qualityErr application.QualityRejectedError
+	if _, err := service.IngressMessage(req); !errors.As(err, &qualityErr) {
 		t.Fatalf("expected rejected quality decision to reject ingress, got %v", err)
+	} else if qualityErr.Decision.QualityDecisionRef == "" {
+		t.Fatalf("expected quality-aware error to carry decision ref, got %+v", qualityErr.Decision)
 	}
 	snapshot := service.Snapshot()
 	if len(snapshot.Messages) != 0 {
@@ -136,6 +139,59 @@ func TestServiceRecordsRejectedQualityDecisionWithoutDispatch(t *testing.T) {
 	}
 	if len(delivery.published) != 0 {
 		t.Fatalf("expected rejected quality decision not to publish delivery, got %+v", delivery.published)
+	}
+}
+
+func TestServiceQualityWarnGateDispatchesAndRecordsWarnedDecision(t *testing.T) {
+	service, delivery := newServiceWithFakeDeliveryAdapter(t)
+	registerDeliveryBridgeEndpoint(t, service)
+	req := rejectingQualityRequest("tc://message/msg_delivery_bridge_warn_gate")
+	req.QualityGate = contracts.QualityGateWarn
+
+	ingress, err := service.IngressMessage(req)
+	if err != nil {
+		t.Fatalf("expected warn gate to accept ingress, got %v", err)
+	}
+	if ingress.QualityDecisionRef == "" {
+		t.Fatalf("expected response to expose quality decision ref, got %+v", ingress)
+	}
+	snapshot := service.Snapshot()
+	if len(snapshot.Messages) != 1 {
+		t.Fatalf("expected warned message to be dispatched, got %+v", snapshot.Messages)
+	}
+	if len(snapshot.QualityDecisions) != 1 || snapshot.QualityDecisions[0].Decision != contracts.QualityDecisionWarned {
+		t.Fatalf("expected warned quality decision, got %+v", snapshot.QualityDecisions)
+	}
+	if len(delivery.published) != 1 {
+		t.Fatalf("expected warn gate to publish delivery, got %+v", delivery.published)
+	}
+}
+
+func TestServiceQualitySkipGateDispatchesAndRecordsSkippedDecision(t *testing.T) {
+	service, delivery := newServiceWithFakeDeliveryAdapter(t)
+	registerDeliveryBridgeEndpoint(t, service)
+	req := rejectingQualityRequest("tc://message/msg_delivery_bridge_skip_gate")
+	req.QualityGate = contracts.QualityGateSkip
+
+	ingress, err := service.IngressMessage(req)
+	if err != nil {
+		t.Fatalf("expected skip gate to accept ingress, got %v", err)
+	}
+	if ingress.QualityDecisionRef == "" {
+		t.Fatalf("expected response to expose quality decision ref, got %+v", ingress)
+	}
+	snapshot := service.Snapshot()
+	if len(snapshot.Messages) != 1 {
+		t.Fatalf("expected skipped message to be dispatched, got %+v", snapshot.Messages)
+	}
+	if len(snapshot.QualityDecisions) != 1 || snapshot.QualityDecisions[0].Decision != contracts.QualityDecisionSkipped {
+		t.Fatalf("expected skipped quality decision, got %+v", snapshot.QualityDecisions)
+	}
+	if len(snapshot.QualityDecisions[0].Violations) != 0 {
+		t.Fatalf("expected skip gate to avoid validator violations, got %+v", snapshot.QualityDecisions[0])
+	}
+	if len(delivery.published) != 1 {
+		t.Fatalf("expected skip gate to publish delivery, got %+v", delivery.published)
 	}
 }
 
@@ -184,6 +240,19 @@ func deliveryBridgeMessageRequest(messageRef string) contracts.MessageIngressReq
 		CorrelationRef:   "tc://task/tsk_delivery_bridge",
 		ReadbackRequired: true,
 	}
+}
+
+func rejectingQualityRequest(messageRef string) contracts.MessageIngressRequest {
+	req := deliveryBridgeMessageRequest(messageRef)
+	req.PhraseologyPolicy = &contracts.PhraseologyPolicy{
+		PolicyRef:      "tc://quality-policy/rejecting",
+		PolicyVersion:  "1",
+		ScopeKind:      "task",
+		RequiredFields: []string{"constraints"},
+		FallbackAction: contracts.QualityFallbackReject,
+		Severity:       contracts.QualitySeverityBlocking,
+	}
+	return req
 }
 
 type fakeDeliveryAdapter struct {

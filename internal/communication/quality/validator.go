@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,26 @@ const (
 )
 
 var defaultReadbackTargets = []string{"goal", "constraints", "next_action"}
+
+var lineageIntentSubstrings = []string{
+	"수정하",
+	"수정해",
+	"수정된",
+	"대체하",
+	"대체해",
+	"대체된",
+	"파생",
+	"기반으로",
+	"기반하여",
+}
+
+var lineageIntentExpressions = []*regexp.Regexp{
+	regexp.MustCompile(`\breplace\b`),
+	regexp.MustCompile(`\bbased on\b`),
+	regexp.MustCompile(`\bderived from\b`),
+	regexp.MustCompile(`\bsupersede(?:s|d)?\b`),
+	regexp.MustCompile(`\bmodify artifact\b`),
+}
 
 type ValidationInput struct {
 	DecisionRef string
@@ -48,6 +69,38 @@ func ValidateMessage(input ValidationInput) contracts.QualityDecision {
 		decision.Violations = append(decision.Violations, violation)
 	}
 	decision.Decision = decisionStatus(policy, decision.Violations)
+	return decision
+}
+
+func ValidateMessageWithGate(input ValidationInput, gate contracts.QualityGateMode) contracts.QualityDecision {
+	if gate == "" {
+		gate = contracts.QualityGateEnforce
+	}
+	if gate == contracts.QualityGateSkip {
+		return skippedDecision(input)
+	}
+	decision := ValidateMessage(input)
+	if gate == contracts.QualityGateWarn && decision.Decision != contracts.QualityDecisionPassed {
+		decision.Decision = contracts.QualityDecisionWarned
+		decision.FallbackAction = contracts.QualityFallbackWarn
+	}
+	return decision
+}
+
+func skippedDecision(input ValidationInput) contracts.QualityDecision {
+	policy := effectivePolicy(input.Request)
+	decision := contracts.QualityDecision{
+		QualityDecisionRef: input.DecisionRef,
+		MessageRef:         input.MessageRef,
+		PolicyRef:          policy.PolicyRef,
+		PolicyVersion:      policy.PolicyVersion,
+		Decision:           contracts.QualityDecisionSkipped,
+		FallbackAction:     contracts.QualityFallbackWarn,
+		CreatedBy:          input.CreatedBy,
+	}
+	if !input.CreatedAt.IsZero() {
+		decision.CreatedAt = input.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
 	return decision
 }
 
@@ -174,21 +227,14 @@ func fieldInConstraintsOrReferences(req contracts.MessageIngressRequest, field s
 }
 
 func mentionsLineageIntent(body string) bool {
-	body = strings.ToLower(body)
-	patterns := []string{
-		"수정",
-		"대체",
-		"파생",
-		"기반",
-		"replace",
-		"based on",
-		"derive",
-		"derived from",
-		"supersede",
-		"modify artifact",
-	}
-	for _, pattern := range patterns {
+	body = strings.ToLower(strings.TrimSpace(body))
+	for _, pattern := range lineageIntentSubstrings {
 		if strings.Contains(body, pattern) {
+			return true
+		}
+	}
+	for _, pattern := range lineageIntentExpressions {
+		if pattern.MatchString(body) {
 			return true
 		}
 	}

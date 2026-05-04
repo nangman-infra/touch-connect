@@ -1,0 +1,16 @@
+{
+  "name": "korean weak basis phrase is not lineage intent",
+  "rule": "missing_lineage_reference",
+  "want_violation": false,
+  "want_decision": "passed",
+  "request": {
+    "sender_endpoint_ref": "tc://endpoint/tcctl",
+    "target_capability": "code.change",
+    "payload": {
+      "summary": "review evidence",
+      "body": "현재 판단의 기반이 약하다. 추가 근거를 요청하는 메시지만 작성한다.",
+      "references": []
+    },
+    "constraints": []
+  }
+}

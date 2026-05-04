@@ -82,6 +82,9 @@ func ValidateMessage(req contracts.MessageIngressRequest) error {
 	if req.Payload.References == nil || req.Constraints == nil {
 		return ErrInvalidInput
 	}
+	if req.QualityGate != "" && !req.QualityGate.Valid() {
+		return ErrInvalidInput
+	}
 	return nil
 }
 

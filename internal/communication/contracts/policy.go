@@ -121,3 +121,32 @@ func ParseConfidenceBand(value string) (ConfidenceBand, error) {
 	}
 	return band, nil
 }
+
+type QualityGateMode string
+
+const (
+	QualityGateEnforce QualityGateMode = "enforce"
+	QualityGateWarn    QualityGateMode = "warn"
+	QualityGateSkip    QualityGateMode = "skip"
+)
+
+func (m QualityGateMode) String() string {
+	return string(m)
+}
+
+func (m QualityGateMode) Valid() bool {
+	switch m {
+	case QualityGateEnforce, QualityGateWarn, QualityGateSkip:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseQualityGateMode(value string) (QualityGateMode, error) {
+	mode := QualityGateMode(value)
+	if !mode.Valid() {
+		return "", fmt.Errorf("invalid quality gate mode %q", value)
+	}
+	return mode, nil
+}

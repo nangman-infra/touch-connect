@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -237,6 +238,11 @@ func writeLookupResult(w http.ResponseWriter, value any, ok bool, err error) {
 
 func writeResult(w http.ResponseWriter, status int, value any, err error) {
 	if err != nil {
+		var apiErr contracts.APIError
+		if errors.As(err, &apiErr) && apiErr.Response.Code == contracts.ErrorCodeQualityRejected {
+			writeErrorResponse(w, apiErr.StatusCode, apiErr.Response)
+			return
+		}
 		writeError(w, http.StatusBadGateway, "server_unavailable", err.Error())
 		return
 	}
@@ -251,4 +257,8 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, code string, message string) {
 	writeJSON(w, status, contracts.ErrorResponse{Code: code, Message: message})
+}
+
+func writeErrorResponse(w http.ResponseWriter, status int, response contracts.ErrorResponse) {
+	writeJSON(w, status, response)
 }

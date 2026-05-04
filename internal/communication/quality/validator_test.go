@@ -119,3 +119,60 @@ func TestValidateMessageCatchesMissingLineageReference(t *testing.T) {
 		t.Fatalf("expected missing lineage reference violation, got %+v", decision.Violations)
 	}
 }
+
+func TestValidateMessageWithGateWarnDowngradesBlockingDecision(t *testing.T) {
+	policy := &contracts.PhraseologyPolicy{
+		PolicyRef:      "tc://quality-policy/rejecting",
+		PolicyVersion:  "1",
+		ScopeKind:      "task",
+		RequiredFields: []string{"constraints"},
+		FallbackAction: contracts.QualityFallbackReject,
+		Severity:       contracts.QualitySeverityBlocking,
+	}
+	decision := ValidateMessageWithGate(ValidationInput{
+		DecisionRef: "tc://quality-decision/qdc_warn_gate",
+		MessageRef:  "tc://message/msg_warn_gate",
+		Request: contracts.MessageIngressRequest{
+			SenderEndpointRef: "tc://endpoint/tcctl",
+			TargetCapability:  "code.change",
+			QualityGate:       contracts.QualityGateWarn,
+			PhraseologyPolicy: policy,
+			Payload: contracts.Payload{
+				Summary:    "change code",
+				Body:       "make a small change",
+				References: []contracts.Reference{},
+			},
+			Constraints: []contracts.Constraint{},
+		},
+	}, contracts.QualityGateWarn)
+	if decision.Decision != contracts.QualityDecisionWarned {
+		t.Fatalf("expected warn gate to record warned decision, got %+v", decision)
+	}
+	if len(decision.Violations) != 1 {
+		t.Fatalf("expected violations to be preserved, got %+v", decision)
+	}
+}
+
+func TestValidateMessageWithGateSkipRecordsSkippedDecision(t *testing.T) {
+	decision := ValidateMessageWithGate(ValidationInput{
+		DecisionRef: "tc://quality-decision/qdc_skip_gate",
+		MessageRef:  "tc://message/msg_skip_gate",
+		Request: contracts.MessageIngressRequest{
+			SenderEndpointRef: "tc://endpoint/tcctl",
+			TargetCapability:  "code.change",
+			QualityGate:       contracts.QualityGateSkip,
+			Payload: contracts.Payload{
+				Summary:    "replace artifact",
+				Body:       "replace the prior artifact with this new version",
+				References: []contracts.Reference{},
+			},
+			Constraints: []contracts.Constraint{},
+		},
+	}, contracts.QualityGateSkip)
+	if decision.Decision != contracts.QualityDecisionSkipped {
+		t.Fatalf("expected skipped decision, got %+v", decision)
+	}
+	if len(decision.Violations) != 0 {
+		t.Fatalf("expected skip gate to avoid validator violations, got %+v", decision.Violations)
+	}
+}

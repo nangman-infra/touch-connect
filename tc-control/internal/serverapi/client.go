@@ -122,9 +122,15 @@ func (c *Client) do(req *http.Request, target any) error {
 	if res.StatusCode >= http.StatusBadRequest {
 		var apiErr contracts.ErrorResponse
 		if err := json.NewDecoder(res.Body).Decode(&apiErr); err == nil && apiErr.Code != "" {
-			return fmt.Errorf("%s: %s", apiErr.Code, apiErr.Message)
+			return contracts.APIError{StatusCode: res.StatusCode, Response: apiErr}
 		}
-		return fmt.Errorf("server_status_%d", res.StatusCode)
+		return contracts.APIError{
+			StatusCode: res.StatusCode,
+			Response: contracts.ErrorResponse{
+				Code:    fmt.Sprintf("server_status_%d", res.StatusCode),
+				Message: fmt.Sprintf("server returned status %d", res.StatusCode),
+			},
+		}
 	}
 	return json.NewDecoder(res.Body).Decode(target)
 }

@@ -76,6 +76,9 @@ type MessageIngressRequest struct {
 	// the policy readback settings take precedence.
 	ReadbackRequired  bool               `json:"readback_required,omitempty"`
 	PhraseologyPolicy *PhraseologyPolicy `json:"phraseology_policy,omitempty"`
+	// QualityGate controls whether quality violations block ingress, warn only, or are skipped.
+	// Empty means enforce for backward-compatible callers.
+	QualityGate QualityGateMode `json:"quality_gate,omitempty"`
 }
 
 type MessageIngressResponse struct {
@@ -262,8 +265,9 @@ type CompleteAttemptResponse struct {
 }
 
 type ErrorResponse struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code            string           `json:"code"`
+	Message         string           `json:"message"`
+	QualityDecision *QualityDecision `json:"quality_decision,omitempty"`
 }
 
 type HealthResponse struct {

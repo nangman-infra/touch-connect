@@ -109,6 +109,94 @@ func TestTCCTLListsEndpointsAndSendsMessageThroughControl(t *testing.T) {
 	}
 }
 
+func TestControlPreservesQualityRejectedEnvelope(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+	controlHTTP := httptest.NewServer(control.Handler())
+	defer controlHTTP.Close()
+
+	req := contracts.MessageIngressRequest{
+		SenderEndpointRef: "tc://endpoint/tcctl",
+		TargetCapability:  "code.change",
+		Payload: contracts.Payload{
+			Summary:    "quality rejected",
+			Body:       "message should fail the quality gate",
+			References: []contracts.Reference{},
+		},
+		Constraints: []contracts.Constraint{},
+		PhraseologyPolicy: &contracts.PhraseologyPolicy{
+			PolicyRef:      "tc://quality-policy/rejecting",
+			PolicyVersion:  "1",
+			ScopeKind:      "task",
+			RequiredFields: []string{"constraints"},
+			FallbackAction: contracts.QualityFallbackReject,
+			Severity:       contracts.QualitySeverityBlocking,
+		},
+	}
+	var apiErr contracts.ErrorResponse
+	postJSON(t, controlHTTP.URL+"/v1/messages", controlHTTP.Client(), req, http.StatusBadRequest, &apiErr)
+	if apiErr.Code != contracts.ErrorCodeQualityRejected || apiErr.QualityDecision == nil {
+		t.Fatalf("expected quality rejected envelope with decision, got %+v", apiErr)
+	}
+	if apiErr.QualityDecision.Decision != contracts.QualityDecisionRejected || apiErr.QualityDecision.QualityDecisionRef == "" {
+		t.Fatalf("expected rejected quality decision details, got %+v", apiErr.QualityDecision)
+	}
+	if snapshot := server.Snapshot(); len(snapshot.Messages) != 0 || len(snapshot.QualityDecisions) != 1 {
+		t.Fatalf("expected rejected message to record only quality decision, got %+v", snapshot)
+	}
+}
+
+func TestTCCTLMessageSendQualityGateSkipRecordsSkippedDecision(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+	controlHTTP := httptest.NewServer(control.Handler())
+	defer controlHTTP.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"--json",
+		"message", "send",
+		"--capability", "code.change",
+		"--summary", "skip quality gate",
+		"--body", "replace the prior artifact with this version",
+		"--quality-gate", "skip",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl message send with quality skip failed: %v stderr=%s", err, stderr.String())
+	}
+	var sent contracts.MessageIngressResponse
+	if err := json.Unmarshal(stdout.Bytes(), &sent); err != nil {
+		t.Fatalf("decode tcctl message send output: %v\n%s", err, stdout.String())
+	}
+	snapshot := server.Snapshot()
+	if len(snapshot.Messages) != 1 || snapshot.Messages[0].MessageRef != sent.MessageRef {
+		t.Fatalf("expected skipped gate message to be dispatched, got %+v", snapshot.Messages)
+	}
+	if len(snapshot.QualityDecisions) != 1 || snapshot.QualityDecisions[0].Decision != contracts.QualityDecisionSkipped {
+		t.Fatalf("expected skipped quality decision, got %+v", snapshot.QualityDecisions)
+	}
+}
+
 func TestTCCTLRejectsIncompatibleContractVersion(t *testing.T) {
 	server := tcserver.NewInMemoryServer()
 	serverHTTP := httptest.NewServer(server.Handler())
@@ -142,7 +230,7 @@ func TestTCCTLCommandHelpDoesNotRequireControl(t *testing.T) {
 	if err := tcctl.Run(context.Background(), []string{"message", "send", "-h"}, &stdout, &stderr); err != nil {
 		t.Fatalf("tcctl message send help failed: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "usage: tcctl message send") || !strings.Contains(stderr.String(), "-capability") {
+	if !strings.Contains(stderr.String(), "usage: tcctl message send") || !strings.Contains(stderr.String(), "-capability") || !strings.Contains(stderr.String(), "-quality-gate") {
 		t.Fatalf("expected message send help in stderr, stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 

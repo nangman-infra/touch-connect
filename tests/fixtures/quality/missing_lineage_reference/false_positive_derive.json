@@ -1,0 +1,16 @@
+{
+  "name": "english derive a benefit phrase is not lineage intent",
+  "rule": "missing_lineage_reference",
+  "want_violation": false,
+  "want_decision": "passed",
+  "request": {
+    "sender_endpoint_ref": "tc://endpoint/tcctl",
+    "target_capability": "code.change",
+    "payload": {
+      "summary": "explain benefit",
+      "body": "derive a benefit from the clearer operator message without modifying an artifact",
+      "references": []
+    },
+    "constraints": []
+  }
+}

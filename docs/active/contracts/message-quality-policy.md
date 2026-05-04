@@ -3,7 +3,7 @@
 > Scope: PhraseologyPolicy, CapabilityClaim, readback, missing-constraint, quality decision 계약
 > Canonical Path: `docs/active/contracts/message-quality-policy.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-05-04
+> Last Reviewed: 2026-05-05
 > Supersedes: `none`
 > Superseded By: `none`
 
@@ -220,6 +220,7 @@ message가 artifact를 수정, 대체, 파생한다고 말하지만 exact artifa
 
 최소 하나의 edge 없이 기존 artifact를 바꾸는 message는 review 또는 clarification 대상이다.
 현재 구현은 payload body의 deterministic keyword pattern과 `payload.references[]`의 artifact/artifact_version ref만 본다.
+한글 `대체로`, `기반이 약하다`나 영문 `derive a benefit`처럼 artifact lineage 의도가 아닌 표현은 위반으로 보지 않는다.
 LLM-assisted lineage intent detection은 v0.1 범위다.
 
 ## CLI 적용 규칙
@@ -229,6 +230,8 @@ LLM-assisted lineage intent detection은 v0.1 범위다.
 규칙:
 
 - default는 quality gate enabled다.
+- `--quality-gate=enforce|warn|skip`을 지원한다.
+- `enforce`는 blocking decision을 reject하고, `warn`은 violation을 기록하되 dispatch하며, `skip`은 validator를 실행하지 않고 skipped decision만 남긴다.
 - operator는 explicit flag로 local dev/test에서만 gate를 끌 수 있다.
 - gate를 끈 message도 `quality_decision=skipped` record를 남긴다.
 - `reject` decision이면 server dispatch를 시작하지 않는다.

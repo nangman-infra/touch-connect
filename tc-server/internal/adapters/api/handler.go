@@ -249,6 +249,15 @@ func writeResult(w http.ResponseWriter, status int, value any, err error) {
 		writeJSON(w, status, value)
 		return
 	}
+	var qualityRejected application.QualityRejectedError
+	if errors.As(err, &qualityRejected) {
+		writeErrorResponse(w, http.StatusBadRequest, contracts.ErrorResponse{
+			Code:            contracts.ErrorCodeQualityRejected,
+			Message:         "message failed the enforce quality gate",
+			QualityDecision: &qualityRejected.Decision,
+		})
+		return
+	}
 	if errors.Is(err, domain.ErrEndpointNotFound) ||
 		errors.Is(err, domain.ErrCapabilityNotFound) ||
 		errors.Is(err, domain.ErrMessageNotFound) ||
@@ -285,6 +294,10 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, code string, message string) {
 	writeJSON(w, status, contracts.ErrorResponse{Code: code, Message: message})
+}
+
+func writeErrorResponse(w http.ResponseWriter, status int, response contracts.ErrorResponse) {
+	writeJSON(w, status, response)
 }
 
 func endpointRefFromPath(path string, suffix string) string {

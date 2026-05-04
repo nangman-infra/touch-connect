@@ -1,0 +1,16 @@
+{
+  "name": "korean adverb 대체로 is not lineage intent",
+  "rule": "missing_lineage_reference",
+  "want_violation": false,
+  "want_decision": "passed",
+  "request": {
+    "sender_endpoint_ref": "tc://endpoint/tcctl",
+    "target_capability": "code.change",
+    "payload": {
+      "summary": "review wording",
+      "body": "대체로 좋다. 입력 검증 문구만 조금 더 명확하게 정리한다.",
+      "references": []
+    },
+    "constraints": []
+  }
+}

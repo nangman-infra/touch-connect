@@ -30,6 +30,9 @@ func TestQualityValidatorFixtures(t *testing.T) {
 		"missing_lineage_reference/passes.json",
 		"missing_lineage_reference/violates.json",
 		"missing_lineage_reference/edge.json",
+		"missing_lineage_reference/false_positive_korean.json",
+		"missing_lineage_reference/false_positive_basis.json",
+		"missing_lineage_reference/false_positive_derive.json",
 	}
 	for _, fixturePath := range fixtures {
 		t.Run(fixturePath, func(t *testing.T) {

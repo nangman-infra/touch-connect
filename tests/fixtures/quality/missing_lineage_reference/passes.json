@@ -1,0 +1,22 @@
+{
+  "name": "lineage intent has artifact reference",
+  "rule": "missing_lineage_reference",
+  "want_violation": false,
+  "want_decision": "passed",
+  "request": {
+    "sender_endpoint_ref": "tc://endpoint/tcctl",
+    "target_capability": "code.change",
+    "payload": {
+      "summary": "replace artifact",
+      "body": "replace the prior artifact with this version",
+      "references": [
+        {
+          "ref": "tc://artifact-version/artifact_v1",
+          "type": "artifact_version",
+          "source_risk": "low"
+        }
+      ]
+    },
+    "constraints": []
+  }
+}

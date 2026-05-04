@@ -57,6 +57,8 @@ func kindPrefix(kind string) string {
 		return "dlq"
 	case "side-effect":
 		return "sfx"
+	case "quality-decision":
+		return "qdc"
 	case "accepted":
 		return "acc"
 	default:

@@ -11,33 +11,35 @@ import (
 )
 
 type Store struct {
-	mu            sync.Mutex
-	sequences     map[string]int
-	endpoints     map[string]domain.Endpoint
-	messages      map[string]domain.Message
-	attempts      map[string]domain.Attempt
-	checkpoints   map[string][]domain.Checkpoint
-	readbacks     map[string][]domain.Readback
-	artifacts     map[string]domain.ArtifactVersion
-	finalizations map[string]domain.ArtifactFinalization
-	deadLetters   map[string]domain.DeadLetter
-	approvals     map[string]domain.ApprovalDecision
-	sideEffects   map[string]domain.SideEffectExecution
+	mu               sync.Mutex
+	sequences        map[string]int
+	endpoints        map[string]domain.Endpoint
+	messages         map[string]domain.Message
+	attempts         map[string]domain.Attempt
+	checkpoints      map[string][]domain.Checkpoint
+	readbacks        map[string][]domain.Readback
+	artifacts        map[string]domain.ArtifactVersion
+	finalizations    map[string]domain.ArtifactFinalization
+	deadLetters      map[string]domain.DeadLetter
+	approvals        map[string]domain.ApprovalDecision
+	sideEffects      map[string]domain.SideEffectExecution
+	qualityDecisions map[string][]contracts.QualityDecision
 }
 
 func NewStore() *Store {
 	return &Store{
-		sequences:     map[string]int{},
-		endpoints:     map[string]domain.Endpoint{},
-		messages:      map[string]domain.Message{},
-		attempts:      map[string]domain.Attempt{},
-		checkpoints:   map[string][]domain.Checkpoint{},
-		readbacks:     map[string][]domain.Readback{},
-		artifacts:     map[string]domain.ArtifactVersion{},
-		finalizations: map[string]domain.ArtifactFinalization{},
-		deadLetters:   map[string]domain.DeadLetter{},
-		approvals:     map[string]domain.ApprovalDecision{},
-		sideEffects:   map[string]domain.SideEffectExecution{},
+		sequences:        map[string]int{},
+		endpoints:        map[string]domain.Endpoint{},
+		messages:         map[string]domain.Message{},
+		attempts:         map[string]domain.Attempt{},
+		checkpoints:      map[string][]domain.Checkpoint{},
+		readbacks:        map[string][]domain.Readback{},
+		artifacts:        map[string]domain.ArtifactVersion{},
+		finalizations:    map[string]domain.ArtifactFinalization{},
+		deadLetters:      map[string]domain.DeadLetter{},
+		approvals:        map[string]domain.ApprovalDecision{},
+		sideEffects:      map[string]domain.SideEffectExecution{},
+		qualityDecisions: map[string][]contracts.QualityDecision{},
 	}
 }
 
@@ -114,6 +116,28 @@ func (s *Store) UpdateMessage(message domain.Message) error {
 	}
 	s.messages[message.MessageRef] = message
 	return nil
+}
+
+func (s *Store) SaveQualityDecision(decision contracts.QualityDecision) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if decision.QualityDecisionRef == "" || decision.MessageRef == "" {
+		return domain.ErrInvalidInput
+	}
+	for _, existing := range s.qualityDecisions[decision.MessageRef] {
+		if existing.QualityDecisionRef == decision.QualityDecisionRef {
+			return domain.ErrInvalidInput
+		}
+	}
+	s.qualityDecisions[decision.MessageRef] = append(s.qualityDecisions[decision.MessageRef], decision)
+	return nil
+}
+
+func (s *Store) QualityDecisions(messageRef string) []contracts.QualityDecision {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	decisions := s.qualityDecisions[messageRef]
+	return append([]contracts.QualityDecision(nil), decisions...)
 }
 
 func (s *Store) ClaimMessage(claim domain.ClaimRequest) (domain.ClaimResult, error) {
@@ -366,16 +390,17 @@ func (s *Store) Snapshot() domain.Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return domain.Snapshot{
-		Endpoints:     sortedMapValues(s.endpoints, func(item domain.Endpoint) string { return item.EndpointRef }),
-		Messages:      sortedMapValues(s.messages, func(item domain.Message) string { return item.MessageRef }),
-		Attempts:      sortedMapValues(s.attempts, func(item domain.Attempt) string { return item.AttemptRef }),
-		Checkpoints:   flattenCheckpoints(s.checkpoints),
-		Readbacks:     flattenReadbacks(s.readbacks),
-		Artifacts:     sortedMapValues(s.artifacts, func(item domain.ArtifactVersion) string { return item.ArtifactVersionRef }),
-		Finalizations: sortedMapValues(s.finalizations, func(item domain.ArtifactFinalization) string { return item.ArtifactVersionRef }),
-		DeadLetters:   sortedMapValues(s.deadLetters, func(item domain.DeadLetter) string { return item.DeadLetterRef }),
-		Approvals:     sortedMapValues(s.approvals, func(item domain.ApprovalDecision) string { return item.ApprovalRef }),
-		SideEffects:   sortedMapValues(s.sideEffects, func(item domain.SideEffectExecution) string { return item.SideEffectExecutionRef }),
+		Endpoints:        sortedMapValues(s.endpoints, func(item domain.Endpoint) string { return item.EndpointRef }),
+		Messages:         sortedMapValues(s.messages, func(item domain.Message) string { return item.MessageRef }),
+		Attempts:         sortedMapValues(s.attempts, func(item domain.Attempt) string { return item.AttemptRef }),
+		Checkpoints:      flattenCheckpoints(s.checkpoints),
+		Readbacks:        flattenReadbacks(s.readbacks),
+		Artifacts:        sortedMapValues(s.artifacts, func(item domain.ArtifactVersion) string { return item.ArtifactVersionRef }),
+		Finalizations:    sortedMapValues(s.finalizations, func(item domain.ArtifactFinalization) string { return item.ArtifactVersionRef }),
+		DeadLetters:      sortedMapValues(s.deadLetters, func(item domain.DeadLetter) string { return item.DeadLetterRef }),
+		Approvals:        sortedMapValues(s.approvals, func(item domain.ApprovalDecision) string { return item.ApprovalRef }),
+		SideEffects:      sortedMapValues(s.sideEffects, func(item domain.SideEffectExecution) string { return item.SideEffectExecutionRef }),
+		QualityDecisions: flattenQualityDecisions(s.qualityDecisions),
 	}
 }
 
@@ -395,6 +420,8 @@ func kindPrefix(kind string) string {
 		return "dlq"
 	case "side-effect":
 		return "sfx"
+	case "quality-decision":
+		return "qdc"
 	case "accepted":
 		return "acc"
 	default:
@@ -450,6 +477,17 @@ func flattenReadbacks(items map[string][]domain.Readback) []domain.Readback {
 			return values[i].Revision < values[j].Revision
 		}
 		return values[i].AttemptRef < values[j].AttemptRef
+	})
+	return values
+}
+
+func flattenQualityDecisions(items map[string][]contracts.QualityDecision) []contracts.QualityDecision {
+	values := make([]contracts.QualityDecision, 0)
+	for _, decisions := range items {
+		values = append(values, decisions...)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		return values[i].QualityDecisionRef < values[j].QualityDecisionRef
 	})
 	return values
 }

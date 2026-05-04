@@ -51,10 +51,11 @@ type Payload struct {
 }
 
 type Reference struct {
-	Ref     string `json:"ref"`
-	Type    string `json:"type"`
-	Title   string `json:"title,omitempty"`
-	Version int    `json:"version,omitempty"`
+	Ref        string     `json:"ref"`
+	Type       string     `json:"type"`
+	Title      string     `json:"title,omitempty"`
+	Version    int        `json:"version,omitempty"`
+	SourceRisk SourceRisk `json:"source_risk,omitempty"`
 }
 
 type Constraint struct {
@@ -71,13 +72,17 @@ type MessageIngressRequest struct {
 	Payload           Payload      `json:"payload"`
 	Constraints       []Constraint `json:"constraints"`
 	CorrelationRef    string       `json:"correlation_ref,omitempty"`
-	ReadbackRequired  bool         `json:"readback_required,omitempty"`
+	// ReadbackRequired is the v0 boolean projection. When PhraseologyPolicy is set,
+	// the policy readback settings take precedence.
+	ReadbackRequired  bool               `json:"readback_required,omitempty"`
+	PhraseologyPolicy *PhraseologyPolicy `json:"phraseology_policy,omitempty"`
 }
 
 type MessageIngressResponse struct {
-	MessageRef  string `json:"message_ref"`
-	DeliveryRef string `json:"delivery_ref"`
-	State       string `json:"state"`
+	MessageRef         string `json:"message_ref"`
+	DeliveryRef        string `json:"delivery_ref"`
+	State              string `json:"state"`
+	QualityDecisionRef string `json:"quality_decision_ref,omitempty"`
 }
 
 type ClaimMessageRequest struct {
@@ -111,6 +116,8 @@ type ClaimMessageResponse struct {
 	Constraints        []Constraint `json:"constraints"`
 	PayloadSummary     string       `json:"payload_summary"`
 	ConstraintSummary  string       `json:"constraint_summary,omitempty"`
+	// ConfidenceBand reflects PhraseologyPolicy compliance, not evidence-supported certainty.
+	ConfidenceBand ConfidenceBand `json:"confidence_band,omitempty"`
 }
 
 type CheckpointRequest struct {
@@ -128,6 +135,8 @@ type CheckpointResponse struct {
 	AttemptRef    string `json:"attempt_ref"`
 	State         string `json:"state"`
 	Revision      int    `json:"revision"`
+	// ConfidenceBand reflects PhraseologyPolicy compliance, not evidence-supported certainty.
+	ConfidenceBand ConfidenceBand `json:"confidence_band,omitempty"`
 }
 
 type ReadbackRequest struct {
@@ -137,6 +146,8 @@ type ReadbackRequest struct {
 	Questions      []string `json:"questions,omitempty"`
 	MissingFields  []string `json:"missing_fields,omitempty"`
 	MissingReasons []string `json:"missing_reasons,omitempty"`
+	// ConfidenceBand reflects PhraseologyPolicy compliance, not evidence-supported certainty.
+	ConfidenceBand ConfidenceBand `json:"confidence_band,omitempty"`
 }
 
 type ReadbackResponse struct {

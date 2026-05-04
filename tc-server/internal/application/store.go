@@ -14,6 +14,7 @@ type Store interface {
 	ReadbackLedger
 	ArtifactLedger
 	GovernanceLedger
+	QualityLedger
 	RefAllocator
 	ProjectionReader
 }
@@ -35,6 +36,11 @@ type GovernanceLedger interface {
 	SaveSideEffectExecution(execution domain.SideEffectExecution) (domain.SideEffectExecution, bool, error)
 	GetSideEffectExecution(executionRef string) (domain.SideEffectExecution, bool)
 	UpdateSideEffectExecution(execution domain.SideEffectExecution) error
+}
+
+type QualityLedger interface {
+	SaveQualityDecision(decision contracts.QualityDecision) error
+	QualityDecisions(messageRef string) []contracts.QualityDecision
 }
 
 type EndpointRegistry interface {

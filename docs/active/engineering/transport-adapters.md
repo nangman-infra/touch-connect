@@ -164,7 +164,7 @@ production adapter 전환 기준은 `Store`가 아니라 `NewServerWithPorts`의
 
 현재 좋은 점:
 
-- `Service`가 `Store` field 없이 `EndpointRegistry`, `MessageLedger`, `ProcessingLedger`, `ReadbackLedger`, `ArtifactLedger`, `GovernanceLedger`, `DeliveryAdapter`, `RefAllocator`, `ProjectionReader`만 사용한다.
+- `Service`가 `Store` field 없이 `EndpointRegistry`, `MessageLedger`, `ProcessingLedger`, `ReadbackLedger`, `ArtifactLedger`, `GovernanceLedger`, `QualityLedger`, `DeliveryAdapter`, `RefAllocator`, `ProjectionReader`만 사용한다.
 - `NewServerWithPorts`가 기존 dev/test path를 유지하고, `NewServerWithPortsAndDeliveryAdapter`가 production delivery adapter 주입 기준점이다.
 - `DeliveryAdapter`가 주입된 경우 `IngressMessage`는 accepted message를 adapter에 publish하고, `ClaimNextMessage`는 adapter fetch 후 `ProcessingLedger.ClaimMessage`로 domain claim을 만든다.
 - terminal checkpoint는 domain checkpoint/message update가 성공한 뒤 `AckDelivery`를 호출한다.
@@ -186,6 +186,7 @@ ProcessingLedger
 ReadbackLedger
 ArtifactLedger
 GovernanceLedger
+QualityLedger
 ProjectionReader
 RefAllocator
 DeliveryAdapter

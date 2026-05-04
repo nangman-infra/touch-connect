@@ -33,6 +33,7 @@ ProcessingLedger
 ReadbackLedger
 ArtifactLedger
 GovernanceLedger
+QualityLedger
 RefAllocator
 ProjectionReader
 ```
@@ -149,14 +150,27 @@ message identity와 immutable message event를 소유한다.
 SaveMessage(message)
 GetMessage(message_ref)
 UpdateMessageProjection(message)
-AppendQualityDecision(decision)
 ```
 
 규칙:
 
 - original message body는 수정하지 않는다.
 - state projection update는 허용하되 message payload mutation은 금지한다.
+
+### QualityLedger
+
+message quality decision source of truth를 append-only로 보존한다.
+
+```text
+SaveQualityDecision(decision)
+QualityDecisions(message_ref)
+```
+
+규칙:
+
+- quality decision은 message body를 mutate하지 않는다.
 - quality decision은 append-only record다.
+- gate를 skip한 message도 `decision=skipped` record를 남긴다.
 
 ### ProcessingLedger
 
@@ -300,6 +314,8 @@ MapAdapterRedelivery(delivery_ref, adapter_metadata)
 | `SaveMessage` | `MessageLedger` | quality decision과 분리 |
 | `GetMessage` | `MessageLedger` | 그대로 이동 |
 | `UpdateMessage` | `MessageLedger` | `UpdateMessageProjection`으로 이름 축소 |
+| `SaveQualityDecision` | `QualityLedger` | append-only quality decision |
+| `QualityDecisions` | `QualityLedger` | message별 quality history |
 | `ClaimMessage` | `ProcessingLedger` | DeliveryAdapter fetch와 분리 |
 | `ClaimNextMessage` | `ProcessingLedger` + `DeliveryAdapter` | adapter fetch 후 domain claim |
 | `SaveAttempt` | `ProcessingLedger` | 그대로 이동 |

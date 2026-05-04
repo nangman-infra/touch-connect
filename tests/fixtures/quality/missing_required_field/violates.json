@@ -1,0 +1,23 @@
+{
+  "name": "required constraints missing",
+  "rule": "missing_required_field",
+  "want_violation": true,
+  "want_decision": "warned",
+  "policy": {
+    "policy_ref": "tc://quality-policy/required",
+    "policy_version": "1",
+    "scope_kind": "capability",
+    "required_fields": ["constraints"],
+    "fallback_action": "warn"
+  },
+  "request": {
+    "sender_endpoint_ref": "tc://endpoint/tcctl",
+    "target_capability": "code.change",
+    "payload": {
+      "summary": "change code",
+      "body": "apply the requested change",
+      "references": []
+    },
+    "constraints": []
+  }
+}

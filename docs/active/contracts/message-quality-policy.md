@@ -139,6 +139,7 @@ created_by
 - `rejected`
 - `clarification_required`
 - `review_required`
+- `skipped`
 
 `violations[]` 항목:
 
@@ -152,11 +153,15 @@ suggested_fix
 
 ## Validator Rules v0
 
-v0 quality module은 아래 다섯 rule을 반드시 구현한다.
+v0 policy surface는 아래 다섯 rule을 정의한다.
+현재 deterministic 구현은 `missing_required_field`, `missing_readback_target`, `missing_lineage_reference` 세 rule부터 시작한다.
+`ambiguous_constraint`와 `scope_expansion_without_approval`은 v0.1에서 rule catalog와 GovernanceLedger dependency를 붙여 구현한다.
 
 ### 1. `missing_required_field`
 
 Policy가 요구한 field가 message envelope, payload, constraints, artifact refs 중 어디에도 없으면 위반이다.
+현재 구현은 `message_ref`, `sender_endpoint_ref`, `target_capability`, `correlation_ref`, `readback_required`, `payload.summary`, `payload.body`, `payload.references`, `constraints`와 constraint/reference key lookup만 지원한다.
+임의 nested dotted path는 v0.1 범위다.
 
 예:
 
@@ -179,6 +184,7 @@ readback required policy인데 receiver가 다시 확인해야 할 field set이 
 
 - `readback_required=true`인데 PhraseologyPolicy가 없으면 default policy를 적용한다.
 - default policy는 `goal`, `constraints`, `next_action` readback을 요구한다.
+- non-nil `PhraseologyPolicy`가 있으면 `readback_required` boolean projection보다 policy의 `readback` 설정이 우선한다.
 
 ### 3. `ambiguous_constraint`
 
@@ -213,6 +219,8 @@ message가 artifact를 수정, 대체, 파생한다고 말하지만 exact artifa
 - `supersedes`
 
 최소 하나의 edge 없이 기존 artifact를 바꾸는 message는 review 또는 clarification 대상이다.
+현재 구현은 payload body의 deterministic keyword pattern과 `payload.references[]`의 artifact/artifact_version ref만 본다.
+LLM-assisted lineage intent detection은 v0.1 범위다.
 
 ## CLI 적용 규칙
 

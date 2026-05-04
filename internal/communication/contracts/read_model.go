@@ -1,17 +1,18 @@
 package contracts
 
 type SnapshotResponse struct {
-	Endpoints     []EndpointRecord             `json:"endpoints"`
-	Messages      []MessageRecord              `json:"messages"`
-	Attempts      []AttemptRecord              `json:"attempts"`
-	Checkpoints   []CheckpointRecord           `json:"checkpoints"`
-	Readbacks     []ReadbackRecord             `json:"readbacks"`
-	Artifacts     []ArtifactRecord             `json:"artifacts"`
-	Finalizations []ArtifactFinalizationRecord `json:"finalizations"`
-	DeadLetters   []DeadLetterRecord           `json:"dead_letters"`
-	Approvals     []ApprovalRecord             `json:"approvals"`
-	SideEffects   []SideEffectRecord           `json:"side_effects"`
-	Freshness     FreshnessRecord              `json:"freshness"`
+	Endpoints        []EndpointRecord             `json:"endpoints"`
+	Messages         []MessageRecord              `json:"messages"`
+	Attempts         []AttemptRecord              `json:"attempts"`
+	Checkpoints      []CheckpointRecord           `json:"checkpoints"`
+	Readbacks        []ReadbackRecord             `json:"readbacks"`
+	Artifacts        []ArtifactRecord             `json:"artifacts"`
+	Finalizations    []ArtifactFinalizationRecord `json:"finalizations"`
+	DeadLetters      []DeadLetterRecord           `json:"dead_letters"`
+	Approvals        []ApprovalRecord             `json:"approvals"`
+	SideEffects      []SideEffectRecord           `json:"side_effects"`
+	QualityDecisions []QualityDecision            `json:"quality_decisions"`
+	Freshness        FreshnessRecord              `json:"freshness"`
 }
 
 type FreshnessRecord struct {

@@ -111,6 +111,34 @@ func TestServiceDeliveryAdapterBridgeNaksWhenDomainClaimFails(t *testing.T) {
 	}
 }
 
+func TestServiceRecordsRejectedQualityDecisionWithoutDispatch(t *testing.T) {
+	service, delivery := newServiceWithFakeDeliveryAdapter(t)
+	registerDeliveryBridgeEndpoint(t, service)
+	req := deliveryBridgeMessageRequest("tc://message/msg_delivery_bridge_rejected")
+	req.PhraseologyPolicy = &contracts.PhraseologyPolicy{
+		PolicyRef:      "tc://quality-policy/rejecting",
+		PolicyVersion:  "1",
+		ScopeKind:      "task",
+		RequiredFields: []string{"constraints"},
+		FallbackAction: contracts.QualityFallbackReject,
+		Severity:       contracts.QualitySeverityBlocking,
+	}
+
+	if _, err := service.IngressMessage(req); !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected rejected quality decision to reject ingress, got %v", err)
+	}
+	snapshot := service.Snapshot()
+	if len(snapshot.Messages) != 0 {
+		t.Fatalf("expected rejected message not to be dispatched, got %+v", snapshot.Messages)
+	}
+	if len(snapshot.QualityDecisions) != 1 || snapshot.QualityDecisions[0].Decision != contracts.QualityDecisionRejected {
+		t.Fatalf("expected append-only rejected quality decision, got %+v", snapshot.QualityDecisions)
+	}
+	if len(delivery.published) != 0 {
+		t.Fatalf("expected rejected quality decision not to publish delivery, got %+v", delivery.published)
+	}
+}
+
 func newServiceWithFakeDeliveryAdapter(t *testing.T) (*application.Service, *fakeDeliveryAdapter) {
 	t.Helper()
 	store := memory.NewStore()
@@ -118,7 +146,7 @@ func newServiceWithFakeDeliveryAdapter(t *testing.T) (*application.Service, *fak
 	settings := application.DefaultSettings()
 	now := time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC)
 	settings.Now = func() time.Time { return now }
-	service, err := application.NewServiceWithDeliveryAdapter(store, store, store, store, store, store, delivery, store, store, settings)
+	service, err := application.NewServiceWithDeliveryAdapter(store, store, store, store, store, store, store, delivery, store, store, settings)
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}

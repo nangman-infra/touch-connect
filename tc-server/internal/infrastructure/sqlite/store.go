@@ -98,4 +98,10 @@ CREATE TABLE IF NOT EXISTS side_effect_executions (
   body TEXT NOT NULL,
   UNIQUE (idempotency_key, protected_scope)
 );
+CREATE TABLE IF NOT EXISTS quality_decisions (
+  quality_decision_ref TEXT PRIMARY KEY,
+  message_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  body TEXT NOT NULL
+);
 `

@@ -1,0 +1,29 @@
+{
+  "name": "required field satisfied by reference type",
+  "rule": "missing_required_field",
+  "want_violation": false,
+  "want_decision": "passed",
+  "policy": {
+    "policy_ref": "tc://quality-policy/required",
+    "policy_version": "1",
+    "scope_kind": "capability",
+    "required_fields": ["evidence"],
+    "fallback_action": "warn"
+  },
+  "request": {
+    "sender_endpoint_ref": "tc://endpoint/tcctl",
+    "target_capability": "code.change",
+    "payload": {
+      "summary": "change code",
+      "body": "apply the requested change",
+      "references": [
+        {
+          "ref": "tc://evidence/browser_001",
+          "type": "evidence",
+          "source_risk": "low"
+        }
+      ]
+    },
+    "constraints": []
+  }
+}

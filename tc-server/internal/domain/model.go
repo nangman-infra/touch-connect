@@ -213,14 +213,15 @@ type ClaimNextRequest struct {
 }
 
 type Snapshot struct {
-	Endpoints     []Endpoint
-	Messages      []Message
-	Attempts      []Attempt
-	Checkpoints   []Checkpoint
-	Readbacks     []Readback
-	Artifacts     []ArtifactVersion
-	Finalizations []ArtifactFinalization
-	DeadLetters   []DeadLetter
-	Approvals     []ApprovalDecision
-	SideEffects   []SideEffectExecution
+	Endpoints        []Endpoint
+	Messages         []Message
+	Attempts         []Attempt
+	Checkpoints      []Checkpoint
+	Readbacks        []Readback
+	Artifacts        []ArtifactVersion
+	Finalizations    []ArtifactFinalization
+	DeadLetters      []DeadLetter
+	Approvals        []ApprovalDecision
+	SideEffects      []SideEffectExecution
+	QualityDecisions []contracts.QualityDecision
 }

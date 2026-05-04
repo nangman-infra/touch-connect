@@ -1,0 +1,27 @@
+{
+  "name": "explicit policy overrides readback boolean",
+  "rule": "missing_readback_target",
+  "want_violation": false,
+  "want_decision": "passed",
+  "policy": {
+    "policy_ref": "tc://quality-policy/readback",
+    "policy_version": "1",
+    "scope_kind": "task",
+    "readback": {
+      "required": false,
+      "targets": []
+    },
+    "fallback_action": "warn"
+  },
+  "request": {
+    "sender_endpoint_ref": "tc://endpoint/tcctl",
+    "target_capability": "code.change",
+    "readback_required": true,
+    "payload": {
+      "summary": "change code",
+      "body": "apply the requested change",
+      "references": []
+    },
+    "constraints": []
+  }
+}

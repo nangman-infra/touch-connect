@@ -133,6 +133,9 @@ func runServerAdapterPortContract(t *testing.T, adapter serverAdapterContract) {
 	if len(snapshot.Endpoints) != 1 || len(snapshot.Messages) != 1 || len(snapshot.Attempts) != 1 {
 		t.Fatalf("expected endpoint/message/attempt projection, got %+v", snapshot)
 	}
+	if len(snapshot.QualityDecisions) != 1 || snapshot.QualityDecisions[0].MessageRef != message.MessageRef {
+		t.Fatalf("expected append-only quality decision projection, got %+v", snapshot.QualityDecisions)
+	}
 	if len(snapshot.Checkpoints) != 2 || len(snapshot.Readbacks) != 1 {
 		t.Fatalf("expected processing/readback projection, checkpoints=%+v readbacks=%+v", snapshot.Checkpoints, snapshot.Readbacks)
 	}

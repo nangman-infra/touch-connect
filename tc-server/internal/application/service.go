@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
+	"github.com/nangman-infra/touch-connect/internal/communication/quality"
 	"github.com/nangman-infra/touch-connect/tc-server/internal/domain"
 )
 
@@ -16,17 +17,18 @@ type Service struct {
 	readbacks   ReadbackLedger
 	artifacts   ArtifactLedger
 	governance  GovernanceLedger
+	quality     QualityLedger
 	delivery    DeliveryAdapter
 	refs        RefAllocator
 	projections ProjectionReader
 	settings    Settings
 }
 
-func NewService(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
-	return NewServiceWithDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, nil, refs, projections, settings)
+func NewService(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, qualityLedger QualityLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
+	return NewServiceWithDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, qualityLedger, nil, refs, projections, settings)
 }
 
-func NewServiceWithDeliveryAdapter(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, delivery DeliveryAdapter, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
+func NewServiceWithDeliveryAdapter(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, qualityLedger QualityLedger, delivery DeliveryAdapter, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
 	if endpoints == nil {
 		return nil, errors.New("endpoint registry is required")
 	}
@@ -45,6 +47,9 @@ func NewServiceWithDeliveryAdapter(endpoints EndpointRegistry, messages MessageL
 	if governance == nil {
 		return nil, errors.New("governance ledger is required")
 	}
+	if qualityLedger == nil {
+		return nil, errors.New("quality ledger is required")
+	}
 	if refs == nil {
 		return nil, errors.New("ref allocator is required")
 	}
@@ -55,7 +60,7 @@ func NewServiceWithDeliveryAdapter(endpoints EndpointRegistry, messages MessageL
 	if err != nil {
 		return nil, err
 	}
-	return &Service{endpoints: endpoints, messages: messages, processing: processing, readbacks: readbacks, artifacts: artifacts, governance: governance, delivery: delivery, refs: refs, projections: projections, settings: accepted}, nil
+	return &Service{endpoints: endpoints, messages: messages, processing: processing, readbacks: readbacks, artifacts: artifacts, governance: governance, quality: qualityLedger, delivery: delivery, refs: refs, projections: projections, settings: accepted}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {
@@ -160,6 +165,19 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 		ReadbackRequired:  req.ReadbackRequired,
 		State:             domain.MessageStateAvailable,
 	}
+	qualityDecision := quality.ValidateMessage(quality.ValidationInput{
+		DecisionRef: s.refs.NextRef("quality-decision"),
+		MessageRef:  message.MessageRef,
+		Request:     req,
+		CreatedAt:   s.now(),
+		CreatedBy:   req.SenderEndpointRef,
+	})
+	if err := s.quality.SaveQualityDecision(qualityDecision); err != nil {
+		return contracts.MessageIngressResponse{}, err
+	}
+	if qualityDecision.Decision == contracts.QualityDecisionRejected {
+		return contracts.MessageIngressResponse{}, domain.ErrInvalidInput
+	}
 	if err := s.messages.SaveMessage(message); err != nil {
 		return contracts.MessageIngressResponse{}, err
 	}
@@ -169,9 +187,10 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 		}
 	}
 	return contracts.MessageIngressResponse{
-		MessageRef:  message.MessageRef,
-		DeliveryRef: message.DeliveryRef,
-		State:       message.State,
+		MessageRef:         message.MessageRef,
+		DeliveryRef:        message.DeliveryRef,
+		State:              message.State,
+		QualityDecisionRef: qualityDecision.QualityDecisionRef,
 	}, nil
 }
 

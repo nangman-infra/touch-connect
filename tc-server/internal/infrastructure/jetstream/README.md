@@ -14,6 +14,7 @@ The adapter must implement transport-facing behavior without changing public
 | `ReadbackLedger` | Persist readback evidence as handoff quality data, not broker ack data. |
 | `ArtifactLedger` | Persist artifact version/finalization and lineage metadata outside stream retention. |
 | `GovernanceLedger` | Persist approval decisions and protected side effect execution records. |
+| `QualityLedger` | Persist append-only PhraseologyPolicy decisions outside broker delivery state. |
 | `ProjectionReader` | Build operator-facing read models from ledgers and adapter metadata. |
 | `RefAllocator` | Create public `tc://...` refs; never use stream sequence as public identity. |
 | `DeliveryAdapter` | Publish/fetch/ack/nak JetStream messages and preserve adapter metadata. |

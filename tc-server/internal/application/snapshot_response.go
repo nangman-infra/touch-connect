@@ -8,16 +8,17 @@ import (
 func (s *Service) SnapshotResponse() contracts.SnapshotResponse {
 	snapshot := s.Snapshot()
 	return contracts.SnapshotResponse{
-		Endpoints:     endpointRecords(snapshot.Endpoints),
-		Messages:      messageRecords(snapshot.Messages),
-		Attempts:      attemptRecords(snapshot.Attempts),
-		Checkpoints:   checkpointRecords(snapshot.Checkpoints),
-		Readbacks:     readbackRecords(snapshot.Readbacks),
-		Artifacts:     artifactRecords(snapshot.Artifacts),
-		Finalizations: artifactFinalizationRecords(snapshot.Finalizations),
-		DeadLetters:   deadLetterRecords(snapshot.DeadLetters),
-		Approvals:     approvalRecords(snapshot.Approvals),
-		SideEffects:   sideEffectRecords(snapshot.SideEffects),
+		Endpoints:        endpointRecords(snapshot.Endpoints),
+		Messages:         messageRecords(snapshot.Messages),
+		Attempts:         attemptRecords(snapshot.Attempts),
+		Checkpoints:      checkpointRecords(snapshot.Checkpoints),
+		Readbacks:        readbackRecords(snapshot.Readbacks),
+		Artifacts:        artifactRecords(snapshot.Artifacts),
+		Finalizations:    artifactFinalizationRecords(snapshot.Finalizations),
+		DeadLetters:      deadLetterRecords(snapshot.DeadLetters),
+		Approvals:        approvalRecords(snapshot.Approvals),
+		SideEffects:      sideEffectRecords(snapshot.SideEffects),
+		QualityDecisions: snapshot.QualityDecisions,
 		Freshness: contracts.FreshnessRecord{
 			GeneratedAt: formatTime(s.now()),
 			Source:      "tc-server",

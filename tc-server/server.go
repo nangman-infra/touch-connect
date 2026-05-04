@@ -60,11 +60,15 @@ func NewServerWithStore(store application.Store, settings application.Settings) 
 	if !ok {
 		return nil, errors.New("store must provide message ledger")
 	}
-	return NewServerWithPorts(store, endpoints, messages, refs, projections, settings)
+	processing, ok := store.(application.ProcessingLedger)
+	if !ok {
+		return nil, errors.New("store must provide processing ledger")
+	}
+	return NewServerWithPorts(store, endpoints, messages, processing, refs, projections, settings)
 }
 
-func NewServerWithPorts(store application.Store, endpoints application.EndpointRegistry, messages application.MessageLedger, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
-	service, err := application.NewService(store, endpoints, messages, refs, projections, settings)
+func NewServerWithPorts(store application.Store, endpoints application.EndpointRegistry, messages application.MessageLedger, processing application.ProcessingLedger, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
+	service, err := application.NewService(store, endpoints, messages, processing, refs, projections, settings)
 	if err != nil {
 		return nil, err
 	}

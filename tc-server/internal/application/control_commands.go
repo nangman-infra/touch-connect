@@ -25,9 +25,9 @@ func (s *Service) CancelTask(req contracts.TaskCommandRequest) (contracts.TaskCo
 		response.MessageRefs = append(response.MessageRefs, message.MessageRef)
 		response.AffectedMessages++
 		if message.AttemptRef != "" {
-			if attempt, ok := s.store.GetAttempt(message.AttemptRef); ok && !attemptClosed(attempt.State) {
+			if attempt, ok := s.processing.GetAttempt(message.AttemptRef); ok && !attemptClosed(attempt.State) {
 				attempt.State = domain.AttemptStateCanceled
-				if err := s.store.UpdateAttempt(attempt); err != nil {
+				if err := s.processing.UpdateAttempt(attempt); err != nil {
 					return contracts.TaskCommandResponse{}, err
 				}
 				response.AttemptRefs = append(response.AttemptRefs, attempt.AttemptRef)

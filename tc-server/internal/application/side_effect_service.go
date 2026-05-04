@@ -11,7 +11,7 @@ func (s *Service) RecordApprovalDecision(attemptRef string, req contracts.Approv
 	if err := domain.ValidateApprovalDecision(req); err != nil {
 		return contracts.ApprovalDecisionResponse{}, err
 	}
-	attempt, ok := s.store.GetAttempt(attemptRef)
+	attempt, ok := s.processing.GetAttempt(attemptRef)
 	if !ok {
 		return contracts.ApprovalDecisionResponse{}, domain.ErrAttemptNotFound
 	}

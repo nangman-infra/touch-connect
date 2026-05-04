@@ -13,12 +13,13 @@ type Service struct {
 	store       Store
 	endpoints   EndpointRegistry
 	messages    MessageLedger
+	processing  ProcessingLedger
 	refs        RefAllocator
 	projections ProjectionReader
 	settings    Settings
 }
 
-func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
+func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("store is required")
 	}
@@ -27,6 +28,9 @@ func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger,
 	}
 	if messages == nil {
 		return nil, errors.New("message ledger is required")
+	}
+	if processing == nil {
+		return nil, errors.New("processing ledger is required")
 	}
 	if refs == nil {
 		return nil, errors.New("ref allocator is required")
@@ -38,7 +42,7 @@ func NewService(store Store, endpoints EndpointRegistry, messages MessageLedger,
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, endpoints: endpoints, messages: messages, refs: refs, projections: projections, settings: accepted}, nil
+	return &Service{store: store, endpoints: endpoints, messages: messages, processing: processing, refs: refs, projections: projections, settings: accepted}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {
@@ -169,7 +173,7 @@ func (s *Service) ClaimMessage(messageRef string, req contracts.ClaimMessageRequ
 		return contracts.ClaimMessageResponse{}, domain.ErrEndpointStale
 	}
 	leaseExpiresAt := s.now().Add(s.settings.AttemptLeaseDuration)
-	result, err := s.store.ClaimMessage(domain.ClaimRequest{
+	result, err := s.processing.ClaimMessage(domain.ClaimRequest{
 		MessageRef:     message.MessageRef,
 		Endpoint:       endpoint,
 		AttemptRef:     s.refs.NextRef("attempt"),
@@ -196,8 +200,8 @@ func (s *Service) ClaimNextMessage(req contracts.ClaimNextMessageRequest) (contr
 		return contracts.ClaimNextMessageResponse{}, domain.ErrEndpointStale
 	}
 	now := s.now()
-	s.store.ReconcileExpiredClaims(now)
-	result, found, err := s.store.ClaimNextMessage(domain.ClaimNextRequest{
+	s.processing.ReconcileExpiredClaims(now)
+	result, found, err := s.processing.ClaimNextMessage(domain.ClaimNextRequest{
 		Endpoint:       endpoint,
 		LeaseExpiresAt: now.Add(s.settings.AttemptLeaseDuration),
 		Now:            now,
@@ -217,7 +221,7 @@ func (s *Service) SubmitCheckpoint(attemptRef string, req contracts.CheckpointRe
 	if err := domain.ValidateCheckpoint(req); err != nil {
 		return contracts.CheckpointResponse{}, err
 	}
-	attempt, ok := s.store.GetAttempt(attemptRef)
+	attempt, ok := s.processing.GetAttempt(attemptRef)
 	if !ok {
 		return contracts.CheckpointResponse{}, domain.ErrAttemptNotFound
 	}
@@ -241,13 +245,13 @@ func (s *Service) SubmitCheckpoint(attemptRef string, req contracts.CheckpointRe
 		MissingFields:     req.MissingFields,
 		MissingReasons:    req.MissingReasons,
 	}
-	accepted, err := s.store.SaveCheckpoint(checkpoint)
+	accepted, err := s.processing.SaveCheckpoint(checkpoint)
 	if err != nil {
 		return contracts.CheckpointResponse{}, err
 	}
 	attempt.State = req.State
 	attempt.Revision = accepted.Revision
-	if err := s.store.UpdateAttempt(attempt); err != nil {
+	if err := s.processing.UpdateAttempt(attempt); err != nil {
 		return contracts.CheckpointResponse{}, err
 	}
 	if err := s.updateMessageStateForCheckpoint(attempt.MessageRef, req.State); err != nil {
@@ -265,7 +269,7 @@ func (s *Service) SubmitReadback(attemptRef string, req contracts.ReadbackReques
 	if err := domain.ValidateReadback(req); err != nil {
 		return contracts.ReadbackResponse{}, err
 	}
-	attempt, ok := s.store.GetAttempt(attemptRef)
+	attempt, ok := s.processing.GetAttempt(attemptRef)
 	if !ok {
 		return contracts.ReadbackResponse{}, domain.ErrAttemptNotFound
 	}
@@ -297,7 +301,7 @@ func (s *Service) SubmitReadback(attemptRef string, req contracts.ReadbackReques
 }
 
 func (s *Service) RefreshLease(attemptRef string, req contracts.RefreshLeaseRequest) (contracts.RefreshLeaseResponse, error) {
-	attempt, ok := s.store.GetAttempt(attemptRef)
+	attempt, ok := s.processing.GetAttempt(attemptRef)
 	if !ok {
 		return contracts.RefreshLeaseResponse{}, domain.ErrAttemptNotFound
 	}
@@ -308,7 +312,7 @@ func (s *Service) RefreshLease(attemptRef string, req contracts.RefreshLeaseRequ
 		return contracts.RefreshLeaseResponse{}, domain.ErrLeaseExpired
 	}
 	attempt.LeaseExpiresAt = s.now().Add(s.settings.AttemptLeaseDuration)
-	if err := s.store.UpdateAttempt(attempt); err != nil {
+	if err := s.processing.UpdateAttempt(attempt); err != nil {
 		return contracts.RefreshLeaseResponse{}, err
 	}
 	return contracts.RefreshLeaseResponse{
@@ -322,7 +326,7 @@ func (s *Service) CompleteAttempt(attemptRef string, req contracts.CompleteAttem
 	if err := domain.ValidateCompletion(req); err != nil {
 		return contracts.CompleteAttemptResponse{}, err
 	}
-	attempt, ok := s.store.GetAttempt(attemptRef)
+	attempt, ok := s.processing.GetAttempt(attemptRef)
 	if !ok {
 		return contracts.CompleteAttemptResponse{}, domain.ErrAttemptNotFound
 	}
@@ -340,11 +344,11 @@ func (s *Service) CompleteAttempt(attemptRef string, req contracts.CompleteAttem
 	}); err != nil {
 		return contracts.CompleteAttemptResponse{}, err
 	}
-	attempt, _ = s.store.GetAttempt(attemptRef)
+	attempt, _ = s.processing.GetAttempt(attemptRef)
 	attempt.State = domain.AttemptStateCompleted
 	message, _ := s.messages.GetMessage(attempt.MessageRef)
 	message.State = domain.MessageStateCompleted
-	if err := s.store.UpdateAttempt(attempt); err != nil {
+	if err := s.processing.UpdateAttempt(attempt); err != nil {
 		return contracts.CompleteAttemptResponse{}, err
 	}
 	if err := s.messages.UpdateMessage(message); err != nil {
@@ -365,7 +369,7 @@ func (s *Service) Snapshot() domain.Snapshot {
 }
 
 func (s *Service) ReconcileExpiredClaims() int {
-	return s.store.ReconcileExpiredClaims(s.now())
+	return s.processing.ReconcileExpiredClaims(s.now())
 }
 
 func (s *Service) now() time.Time {

@@ -73,7 +73,7 @@ func (s *Service) validateCheckpointArtifactRefs(attempt domain.Attempt, artifac
 }
 
 func (s *Service) requireLiveAttempt(attemptRef string, endpointRef string) (domain.Attempt, error) {
-	attempt, ok := s.store.GetAttempt(attemptRef)
+	attempt, ok := s.processing.GetAttempt(attemptRef)
 	if !ok {
 		return domain.Attempt{}, domain.ErrAttemptNotFound
 	}

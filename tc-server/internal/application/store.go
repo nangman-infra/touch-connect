@@ -8,12 +8,6 @@ import (
 )
 
 type Store interface {
-	ClaimMessage(claim domain.ClaimRequest) (domain.ClaimResult, error)
-	ClaimNextMessage(claim domain.ClaimNextRequest) (domain.ClaimResult, bool, error)
-	SaveAttempt(attempt domain.Attempt) error
-	GetAttempt(attemptRef string) (domain.Attempt, bool)
-	UpdateAttempt(attempt domain.Attempt) error
-	SaveCheckpoint(checkpoint domain.Checkpoint) (domain.Checkpoint, error)
 	SaveReadback(readback domain.Readback) (domain.Readback, error)
 	SaveArtifactVersion(version domain.ArtifactVersion) error
 	GetArtifactVersion(artifactVersionRef string) (domain.ArtifactVersion, bool)
@@ -24,7 +18,6 @@ type Store interface {
 	SaveSideEffectExecution(execution domain.SideEffectExecution) (domain.SideEffectExecution, bool, error)
 	GetSideEffectExecution(executionRef string) (domain.SideEffectExecution, bool)
 	UpdateSideEffectExecution(execution domain.SideEffectExecution) error
-	ReconcileExpiredClaims(now time.Time) int
 }
 
 type EndpointRegistry interface {
@@ -39,6 +32,16 @@ type MessageLedger interface {
 	SaveMessage(message domain.Message) error
 	GetMessage(messageRef string) (domain.Message, bool)
 	UpdateMessage(message domain.Message) error
+}
+
+type ProcessingLedger interface {
+	ClaimMessage(claim domain.ClaimRequest) (domain.ClaimResult, error)
+	ClaimNextMessage(claim domain.ClaimNextRequest) (domain.ClaimResult, bool, error)
+	SaveAttempt(attempt domain.Attempt) error
+	GetAttempt(attemptRef string) (domain.Attempt, bool)
+	UpdateAttempt(attempt domain.Attempt) error
+	SaveCheckpoint(checkpoint domain.Checkpoint) (domain.Checkpoint, error)
+	ReconcileExpiredClaims(now time.Time) int
 }
 
 type RefAllocator interface {

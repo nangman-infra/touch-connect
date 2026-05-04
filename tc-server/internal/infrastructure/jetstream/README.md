@@ -71,11 +71,15 @@ Implemented:
 - `NakDelivery`
 - publish dedupe through `Nats-Msg-Id`
 - adapter metadata receipt for stream, consumer, sequence, subject, duplicate status, and redelivery count
+- optional service bridge through `NewServerWithPortsAndDeliveryAdapter`
+- `IngressMessage` publish to `DeliveryAdapter`
+- `ClaimNextMessage` delivery fetch followed by `ProcessingLedger.ClaimMessage`
+- terminal checkpoint `AckDelivery` after domain checkpoint and message state update
 
 Not connected yet:
 
-- service runtime dispatch path
-- durable domain claim handoff from `ClaimNextMessage` to `DeliveryAdapter` plus `ProcessingLedger`
+- concrete `tc-server` config profile that instantiates this JetStream adapter
+- non-terminal blocked/retrying checkpoint broker policy
 
 Current W2 bootstrap command:
 
@@ -101,6 +105,9 @@ The fetched JetStream message is tracked in process by `delivery_ref` until
 `AckDelivery` or `NakDelivery` is called. That pending map only binds broker
 ack state to the public delivery ref; it is not task history, attempt state, or
 lineage storage.
+
+The application service bridge is optional. Local memory and SQLite servers keep
+their existing dev/test path when no `DeliveryAdapter` is provided.
 
 ## Sources
 

@@ -411,9 +411,10 @@ Store port split PR은 아래를 만족해야 한다.
 6. public refs는 adapter-native id와 분리된다.
 7. docs validator가 통과한다.
 
-W1 종료 시점의 남은 explicit handoff:
+현재 explicit handoff 상태:
 
-- `ClaimNextMessage`는 다음 단계에서 `DeliveryAdapter` fetch와 `ProcessingLedger` domain claim으로 분리한다.
+- optional `DeliveryAdapter`가 주입된 `ClaimNextMessage`는 adapter fetch와 `ProcessingLedger` domain claim으로 분리된다.
+- 기존 memory/SQLite dev/test server는 `DeliveryAdapter` 없이 기존 `ProcessingLedger.ClaimNextMessage` path를 유지한다.
 - JetStream stream sequence, consumer sequence, ack metadata는 public `tc://...` refs를 대체하지 않는다.
 
 ## Sources

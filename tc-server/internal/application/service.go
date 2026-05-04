@@ -16,12 +16,17 @@ type Service struct {
 	readbacks   ReadbackLedger
 	artifacts   ArtifactLedger
 	governance  GovernanceLedger
+	delivery    DeliveryAdapter
 	refs        RefAllocator
 	projections ProjectionReader
 	settings    Settings
 }
 
 func NewService(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
+	return NewServiceWithDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, nil, refs, projections, settings)
+}
+
+func NewServiceWithDeliveryAdapter(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, delivery DeliveryAdapter, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
 	if endpoints == nil {
 		return nil, errors.New("endpoint registry is required")
 	}
@@ -50,7 +55,7 @@ func NewService(endpoints EndpointRegistry, messages MessageLedger, processing P
 	if err != nil {
 		return nil, err
 	}
-	return &Service{endpoints: endpoints, messages: messages, processing: processing, readbacks: readbacks, artifacts: artifacts, governance: governance, refs: refs, projections: projections, settings: accepted}, nil
+	return &Service{endpoints: endpoints, messages: messages, processing: processing, readbacks: readbacks, artifacts: artifacts, governance: governance, delivery: delivery, refs: refs, projections: projections, settings: accepted}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {
@@ -158,6 +163,11 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 	if err := s.messages.SaveMessage(message); err != nil {
 		return contracts.MessageIngressResponse{}, err
 	}
+	if s.delivery != nil {
+		if _, err := s.delivery.PublishAcceptedMessage(message); err != nil {
+			return contracts.MessageIngressResponse{}, err
+		}
+	}
 	return contracts.MessageIngressResponse{
 		MessageRef:  message.MessageRef,
 		DeliveryRef: message.DeliveryRef,
@@ -209,6 +219,9 @@ func (s *Service) ClaimNextMessage(req contracts.ClaimNextMessageRequest) (contr
 	}
 	now := s.now()
 	s.processing.ReconcileExpiredClaims(now)
+	if s.delivery != nil {
+		return s.claimNextMessageWithDeliveryAdapter(endpoint, now)
+	}
 	result, found, err := s.processing.ClaimNextMessage(domain.ClaimNextRequest{
 		Endpoint:       endpoint,
 		LeaseExpiresAt: now.Add(s.settings.AttemptLeaseDuration),
@@ -220,6 +233,42 @@ func (s *Service) ClaimNextMessage(req contracts.ClaimNextMessageRequest) (contr
 	}
 	if !found {
 		return contracts.ClaimNextMessageResponse{Empty: true}, nil
+	}
+	claim := claimResponseFromResult(result, endpoint.EndpointRef)
+	return contracts.ClaimNextMessageResponse{Claim: &claim}, nil
+}
+
+func (s *Service) claimNextMessageWithDeliveryAdapter(endpoint domain.Endpoint, now time.Time) (contracts.ClaimNextMessageResponse, error) {
+	delivery, found, err := s.delivery.FetchNextDelivery(DeliveryFetchRequest{
+		EndpointRef:  endpoint.EndpointRef,
+		Capabilities: capabilityNames(endpoint.Capabilities),
+	})
+	if err != nil {
+		return contracts.ClaimNextMessageResponse{}, err
+	}
+	if !found {
+		return contracts.ClaimNextMessageResponse{Empty: true}, nil
+	}
+	result, err := s.processing.ClaimMessage(domain.ClaimRequest{
+		MessageRef:     delivery.MessageRef,
+		Endpoint:       endpoint,
+		AttemptRef:     s.refs.NextRef("attempt"),
+		DeadLetterRef:  s.refs.NextRef("dead-letter"),
+		LeaseExpiresAt: now.Add(s.settings.AttemptLeaseDuration),
+		Now:            now,
+		MaxRedelivery:  s.settings.MaxRedelivery,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrMessageDeadLettered) {
+			if ackErr := s.delivery.AckDelivery(delivery.DeliveryRef); ackErr != nil {
+				return contracts.ClaimNextMessageResponse{}, errors.Join(err, ackErr)
+			}
+			return contracts.ClaimNextMessageResponse{Empty: true}, nil
+		}
+		if nakErr := s.delivery.NakDelivery(delivery.DeliveryRef, err.Error()); nakErr != nil {
+			return contracts.ClaimNextMessageResponse{}, errors.Join(err, nakErr)
+		}
+		return contracts.ClaimNextMessageResponse{}, err
 	}
 	claim := claimResponseFromResult(result, endpoint.EndpointRef)
 	return contracts.ClaimNextMessageResponse{Claim: &claim}, nil
@@ -263,6 +312,9 @@ func (s *Service) SubmitCheckpoint(attemptRef string, req contracts.CheckpointRe
 		return contracts.CheckpointResponse{}, err
 	}
 	if err := s.updateMessageStateForCheckpoint(attempt.MessageRef, req.State); err != nil {
+		return contracts.CheckpointResponse{}, err
+	}
+	if err := s.ackDeliveryForTerminalCheckpoint(attempt.MessageRef, req.State); err != nil {
 		return contracts.CheckpointResponse{}, err
 	}
 	return contracts.CheckpointResponse{
@@ -411,6 +463,17 @@ func (s *Service) updateMessageStateForCheckpoint(messageRef string, attemptStat
 		message.State = domain.MessageStateCompleted
 	}
 	return s.messages.UpdateMessage(message)
+}
+
+func (s *Service) ackDeliveryForTerminalCheckpoint(messageRef string, attemptState string) error {
+	if s.delivery == nil || !attemptClosed(attemptState) || attemptState == domain.AttemptStateOrphaned {
+		return nil
+	}
+	message, ok := s.messages.GetMessage(messageRef)
+	if !ok {
+		return domain.ErrMessageNotFound
+	}
+	return s.delivery.AckDelivery(message.DeliveryRef)
 }
 
 func capabilityMap(items []contracts.Capability) map[string]contracts.Capability {

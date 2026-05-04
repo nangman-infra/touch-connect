@@ -164,15 +164,18 @@ production adapter 전환 기준은 `Store`가 아니라 `NewServerWithPorts`의
 
 현재 좋은 점:
 
-- `Service`가 `Store` field 없이 `EndpointRegistry`, `MessageLedger`, `ProcessingLedger`, `ReadbackLedger`, `ArtifactLedger`, `GovernanceLedger`, `RefAllocator`, `ProjectionReader`만 사용한다.
-- `NewServerWithPorts`가 production adapter 주입 기준점이다.
+- `Service`가 `Store` field 없이 `EndpointRegistry`, `MessageLedger`, `ProcessingLedger`, `ReadbackLedger`, `ArtifactLedger`, `GovernanceLedger`, `DeliveryAdapter`, `RefAllocator`, `ProjectionReader`만 사용한다.
+- `NewServerWithPorts`가 기존 dev/test path를 유지하고, `NewServerWithPortsAndDeliveryAdapter`가 production delivery adapter 주입 기준점이다.
+- `DeliveryAdapter`가 주입된 경우 `IngressMessage`는 accepted message를 adapter에 publish하고, `ClaimNextMessage`는 adapter fetch 후 `ProcessingLedger.ClaimMessage`로 domain claim을 만든다.
+- terminal checkpoint는 domain checkpoint/message update가 성공한 뒤 `AckDelivery`를 호출한다.
 - `tests/server_adapter_contract_test.go`가 memory/SQLite를 같은 behavior contract로 검증한다.
+- `tc-server/internal/application/service_delivery_adapter_test.go`가 delivery adapter bridge의 publish, fetch, domain claim, terminal ack, claim-failure nak을 검증한다.
 
 정제해야 할 지점:
 
-- `ClaimMessage`와 `ClaimNextMessage`는 transport ack와 domain claim을 분리하는 `DeliveryAdapter` plus `ProcessingLedger` 경계로 쪼개야 한다.
 - memory/SQLite는 한 struct가 모든 port를 제공하므로 production adapter 구현 전에 port별 contract tests를 유지해야 한다.
-- JetStream ack와 attempt terminal checkpoint의 연결 순서를 명시해야 한다.
+- concrete server config profile이 아직 JetStream adapter를 instantiate하지 않는다.
+- non-terminal blocked/retrying checkpoint의 broker ack/nak policy는 다음 policy step에서 명시해야 한다.
 
 권장 분리:
 
@@ -240,6 +243,7 @@ NATS_URL=nats://127.0.0.1:4222 go test -tags=integration,jetstream ./tc-server/i
 현재 concrete adapter는 `PublishAcceptedMessage`, `FetchNextDelivery`, `AckDelivery`, `NakDelivery`까지 구현한다.
 `FetchNextDelivery`는 durable pull consumer에서 후보 delivery를 가져와 `delivery_ref` 기준 in-process pending state에 묶는다.
 이 pending state는 broker ack/nak 연결용이며 domain attempt completion이나 durable task history를 대체하지 않는다.
+service bridge는 optional `DeliveryAdapter`가 주입된 경우에만 켜진다.
 
 ## Stop Doing Enforcement
 

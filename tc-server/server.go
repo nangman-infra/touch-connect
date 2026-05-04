@@ -51,7 +51,11 @@ func NewServerWithStore(store application.Store, settings application.Settings) 
 }
 
 func NewServerWithPorts(endpoints application.EndpointRegistry, messages application.MessageLedger, processing application.ProcessingLedger, readbacks application.ReadbackLedger, artifacts application.ArtifactLedger, governance application.GovernanceLedger, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
-	service, err := application.NewService(endpoints, messages, processing, readbacks, artifacts, governance, refs, projections, settings)
+	return NewServerWithPortsAndDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, nil, refs, projections, settings)
+}
+
+func NewServerWithPortsAndDeliveryAdapter(endpoints application.EndpointRegistry, messages application.MessageLedger, processing application.ProcessingLedger, readbacks application.ReadbackLedger, artifacts application.ArtifactLedger, governance application.GovernanceLedger, delivery application.DeliveryAdapter, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
+	service, err := application.NewServiceWithDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, delivery, refs, projections, settings)
 	if err != nil {
 		return nil, err
 	}

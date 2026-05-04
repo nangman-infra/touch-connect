@@ -92,6 +92,28 @@ func WriteArtifact(w io.Writer, item contracts.ArtifactRecord) {
 	)
 }
 
+func WriteArtifactLineage(w io.Writer, item contracts.ArtifactLineage) {
+	fmt.Fprintf(w, "lineage=%s\nquery=%s\nartifact=%s\ncurrent_version=%s\nversions=%d\nedges=%d\n",
+		item.LineageRef,
+		item.QueryRef,
+		item.ArtifactRef,
+		item.CurrentVersionRef,
+		len(item.Versions),
+		len(item.Edges),
+	)
+	for _, version := range item.Versions {
+		fmt.Fprintf(w, "version\t%s\tartifact=%s\tmessage=%s\tattempt=%s\n",
+			version.ArtifactVersionRef,
+			version.ArtifactRef,
+			version.MessageRef,
+			version.AttemptRef,
+		)
+	}
+	for _, edge := range item.Edges {
+		fmt.Fprintf(w, "edge\t%s\t%s\t%s\n", edge.Relation, edge.FromRef, edge.ToRef)
+	}
+}
+
 func WriteApprovals(w io.Writer, items []contracts.ApprovalRecord) {
 	for _, item := range items {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.ApprovalRef, item.Status, item.TargetType, item.TargetRef)
@@ -107,6 +129,33 @@ func WriteApproval(w io.Writer, item contracts.ApprovalRecord) {
 		item.RequestedByActorID,
 		item.DecidedByActorID,
 	)
+}
+
+func WriteApprovalChain(w io.Writer, item contracts.ApprovalChain) {
+	currentStatus := ""
+	currentRef := ""
+	if item.Current != nil {
+		currentStatus = item.Current.Status
+		currentRef = item.Current.ApprovalRef
+	}
+	fmt.Fprintf(w, "chain=%s\nquery=%s\ncurrent=%s\nstatus=%s\ntarget=%s:%s\ndecisions=%d\n",
+		item.ChainRef,
+		item.QueryRef,
+		currentRef,
+		currentStatus,
+		item.TargetType,
+		item.TargetRef,
+		len(item.Decisions),
+	)
+	for _, decision := range item.Decisions {
+		fmt.Fprintf(w, "decision\t%s\t%s\tattempt=%s\tmessage=%s\tdecided_by=%s\n",
+			decision.ApprovalRef,
+			decision.Status,
+			decision.AttemptRef,
+			decision.MessageRef,
+			decision.DecidedByActorID,
+		)
+	}
 }
 
 func WriteDeadLetters(w io.Writer, items []contracts.DeadLetterRecord) {

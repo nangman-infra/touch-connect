@@ -374,6 +374,37 @@ func TestTCCTLRecordsApprovalThroughControl(t *testing.T) {
 	if approved.Status != "approved" || approved.DecidedByActorID != "actor.approver" {
 		t.Fatalf("expected approved decision, got %+v", approved)
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"--json",
+		"approval", "chain", claim.AttemptRef,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl approval chain failed: %v stderr=%s", err, stderr.String())
+	}
+	var chain contracts.ApprovalChain
+	if err := json.Unmarshal(stdout.Bytes(), &chain); err != nil {
+		t.Fatalf("decode approval chain output: %v\n%s", err, stdout.String())
+	}
+	if chain.Current == nil || chain.Current.ApprovalRef != "approval.cli.1" || len(chain.Decisions) != 1 {
+		t.Fatalf("expected approval chain to expose current decision, got %+v", chain)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"approval", "chain", "side-effect.cli.1",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl approval chain text failed: %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "chain=") || !strings.Contains(stdout.String(), "decision\tapproval.cli.1\tapproved") {
+		t.Fatalf("expected approval chain details in output, got %q", stdout.String())
+	}
 }
 
 func TestTCCTLTaskCancelThroughControl(t *testing.T) {
@@ -558,6 +589,79 @@ func TestTCCTLArtifactFinalizeThroughControl(t *testing.T) {
 	if snapshot := server.Snapshot(); len(snapshot.Finalizations) != 1 {
 		t.Fatalf("expected one finalization in server snapshot, got %+v", snapshot.Finalizations)
 	}
+}
+
+func TestTCCTLArtifactLineageThroughControl(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	message := ingressMessage(t, serverHTTP.URL, serverHTTP.Client(), false)
+	claim := claimMessage(t, serverHTTP.URL, serverHTTP.Client(), message.MessageRef, tcworker.DefaultConfig().EndpointRef, http.StatusAccepted)
+	parent := artifactRequest("tc://artifact-version/lineage_cli_v1")
+	parent.ArtifactRef = "tc://artifact/lineage_cli"
+	parent.BasedOnMessageRefs = []string{message.MessageRef}
+	if _, err := worker.RegisterArtifactVersion(context.Background(), claim.AttemptRef, parent); err != nil {
+		t.Fatalf("register parent artifact version: %v", err)
+	}
+	child := artifactRequest("tc://artifact-version/lineage_cli_v2")
+	child.ArtifactRef = parent.ArtifactRef
+	child.BasedOnArtifactVersionRefs = []string{parent.ArtifactVersionRef}
+	if _, err := worker.RegisterArtifactVersion(context.Background(), claim.AttemptRef, child); err != nil {
+		t.Fatalf("register child artifact version: %v", err)
+	}
+	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+	controlHTTP := httptest.NewServer(control.Handler())
+	defer controlHTTP.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"--json",
+		"artifact", "lineage", parent.ArtifactVersionRef,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl artifact lineage failed: %v stderr=%s", err, stderr.String())
+	}
+	var lineage contracts.ArtifactLineage
+	if err := json.Unmarshal(stdout.Bytes(), &lineage); err != nil {
+		t.Fatalf("decode artifact lineage output: %v\n%s", err, stdout.String())
+	}
+	if lineage.CurrentVersionRef != child.ArtifactVersionRef || len(lineage.Versions) != 2 {
+		t.Fatalf("expected lineage to include parent and child, got %+v", lineage)
+	}
+	if !lineageHasEdge(lineage.Edges, parent.ArtifactVersionRef, child.ArtifactVersionRef, "derived_from") {
+		t.Fatalf("expected derived_from edge, got %+v", lineage.Edges)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"artifact", "lineage", parent.ArtifactRef,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl artifact lineage text failed: %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "lineage=") || !strings.Contains(stdout.String(), "edge\tderived_from\t"+parent.ArtifactVersionRef+"\t"+child.ArtifactVersionRef) {
+		t.Fatalf("expected artifact lineage details in output, got %q", stdout.String())
+	}
+}
+
+func lineageHasEdge(edges []contracts.ArtifactLineageEdge, from string, to string, relation string) bool {
+	for _, edge := range edges {
+		if edge.FromRef == from && edge.ToRef == to && edge.Relation == relation {
+			return true
+		}
+	}
+	return false
 }
 
 func TestTCCTLCanonicalScenarioRunAndVerify(t *testing.T) {

@@ -123,6 +123,12 @@ func (c *Client) Artifact(ctx context.Context, ref string) (contracts.ArtifactRe
 	return out, err
 }
 
+func (c *Client) ArtifactLineage(ctx context.Context, ref string) (contracts.ArtifactLineage, error) {
+	var out contracts.ArtifactLineage
+	err := c.get(ctx, "/v1/artifacts/lineage?ref="+url.QueryEscape(ref), &out)
+	return out, err
+}
+
 func (c *Client) FinalizeArtifact(ctx context.Context, req contracts.ArtifactFinalizeRequest) (contracts.ArtifactFinalizeResponse, error) {
 	var out contracts.ArtifactFinalizeResponse
 	err := c.post(ctx, "/v1/artifacts/finalize", req, &out)
@@ -138,6 +144,12 @@ func (c *Client) Approvals(ctx context.Context) ([]contracts.ApprovalRecord, err
 func (c *Client) Approval(ctx context.Context, ref string) (contracts.ApprovalRecord, error) {
 	var out contracts.ApprovalRecord
 	err := c.get(ctx, "/v1/approvals/inspect?ref="+url.QueryEscape(ref), &out)
+	return out, err
+}
+
+func (c *Client) ApprovalChain(ctx context.Context, ref string) (contracts.ApprovalChain, error) {
+	var out contracts.ApprovalChain
+	err := c.get(ctx, "/v1/approvals/chain?ref="+url.QueryEscape(ref), &out)
 	return out, err
 }
 

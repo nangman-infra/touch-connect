@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
+	"github.com/nangman-infra/touch-connect/internal/communication/governance"
 )
 
 func (s *Service) Capabilities(ctx context.Context) (map[string][]string, error) {
@@ -103,6 +104,15 @@ func (s *Service) Approval(ctx context.Context, ref string) (contracts.ApprovalR
 		}
 	}
 	return contracts.ApprovalRecord{}, false, nil
+}
+
+func (s *Service) ApprovalChain(ctx context.Context, ref string) (contracts.ApprovalChain, bool, error) {
+	snapshot, err := s.Snapshot(ctx)
+	if err != nil {
+		return contracts.ApprovalChain{}, false, err
+	}
+	chain, ok := governance.BuildApprovalChain(ref, snapshot.Approvals)
+	return chain, ok, nil
 }
 
 func (s *Service) DeadLetters(ctx context.Context) ([]contracts.DeadLetterRecord, error) {

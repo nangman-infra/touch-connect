@@ -18,7 +18,7 @@ func (r Runtime) artifact(ctx context.Context, args []string) error {
 	if args[0] == "help" {
 		return r.artifactCommandHelp(args[1:])
 	}
-	if err := requireArgs(args, 1, "tcctl artifact <list|inspect|finalize>"); err != nil {
+	if err := requireArgs(args, 1, "tcctl artifact <list|inspect|lineage|finalize>"); err != nil {
 		return err
 	}
 	switch args[0] {
@@ -48,6 +48,18 @@ func (r Runtime) artifact(ctx context.Context, args []string) error {
 			return output.WriteJSON(r.stdout, value)
 		}
 		output.WriteArtifact(r.stdout, value)
+	case "lineage":
+		if err := requireArgs(args[1:], 1, "tcctl artifact lineage <artifact_ref|artifact_version_ref|message_ref|task_ref>"); err != nil {
+			return err
+		}
+		value, err := r.client.ArtifactLineage(ctx, args[1])
+		if err != nil {
+			return unavailableError(err)
+		}
+		if r.config.JSON {
+			return output.WriteJSON(r.stdout, value)
+		}
+		output.WriteArtifactLineage(r.stdout, value)
 	case "finalize":
 		return r.finalizeArtifact(ctx, args[1:])
 	default:
@@ -94,7 +106,7 @@ func (r Runtime) approval(ctx context.Context, args []string) error {
 	if args[0] == "help" {
 		return r.approvalCommandHelp(args[1:])
 	}
-	if err := requireArgs(args, 1, "tcctl approval <list|inspect|approve|reject>"); err != nil {
+	if err := requireArgs(args, 1, "tcctl approval <list|inspect|chain|approve|reject>"); err != nil {
 		return err
 	}
 	switch args[0] {
@@ -119,6 +131,18 @@ func (r Runtime) approval(ctx context.Context, args []string) error {
 			return output.WriteJSON(r.stdout, value)
 		}
 		output.WriteApproval(r.stdout, value)
+	case "chain":
+		if err := requireArgs(args[1:], 1, "tcctl approval chain <approval_ref|message_ref|attempt_ref|target_ref>"); err != nil {
+			return err
+		}
+		value, err := r.client.ApprovalChain(ctx, args[1])
+		if err != nil {
+			return unavailableError(err)
+		}
+		if r.config.JSON {
+			return output.WriteJSON(r.stdout, value)
+		}
+		output.WriteApprovalChain(r.stdout, value)
 	case "approve":
 		return r.recordApproval(ctx, args[1:], "approved")
 	case "reject":
@@ -239,11 +263,12 @@ func (r Runtime) dlq(ctx context.Context, args []string) error {
 }
 
 func writeArtifactHelp(w io.Writer) {
-	fmt.Fprintln(w, "usage: tcctl artifact <list|inspect|finalize>")
+	fmt.Fprintln(w, "usage: tcctl artifact <list|inspect|lineage|finalize>")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  list [--task <task_ref>]                  list artifact versions")
 	fmt.Fprintln(w, "  inspect <artifact_version_ref>            inspect one artifact version")
+	fmt.Fprintln(w, "  lineage <ref>                             show artifact lineage graph")
 	fmt.Fprintln(w, "  finalize <artifact_version_ref> --actor   finalize an artifact version")
 }
 
@@ -257,6 +282,8 @@ func (r Runtime) artifactCommandHelp(args []string) error {
 		return r.artifact(context.Background(), []string{"list", "-h"})
 	case "inspect":
 		fmt.Fprintln(r.stdout, "usage: tcctl artifact inspect <artifact_version_ref>")
+	case "lineage":
+		fmt.Fprintln(r.stdout, "usage: tcctl artifact lineage <artifact_ref|artifact_version_ref|message_ref|task_ref>")
 	case "finalize":
 		return r.finalizeArtifact(context.Background(), []string{"-h"})
 	default:
@@ -266,11 +293,12 @@ func (r Runtime) artifactCommandHelp(args []string) error {
 }
 
 func writeApprovalHelp(w io.Writer) {
-	fmt.Fprintln(w, "usage: tcctl approval <list|inspect|approve|reject>")
+	fmt.Fprintln(w, "usage: tcctl approval <list|inspect|chain|approve|reject>")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  list       list approval records")
 	fmt.Fprintln(w, "  inspect    inspect one approval record")
+	fmt.Fprintln(w, "  chain      show approval chain")
 	fmt.Fprintln(w, "  approve    record an approved decision")
 	fmt.Fprintln(w, "  reject     record a rejected decision")
 }
@@ -285,6 +313,8 @@ func (r Runtime) approvalCommandHelp(args []string) error {
 		fmt.Fprintln(r.stdout, "usage: tcctl approval list")
 	case "inspect":
 		fmt.Fprintln(r.stdout, "usage: tcctl approval inspect <approval_ref>")
+	case "chain":
+		fmt.Fprintln(r.stdout, "usage: tcctl approval chain <approval_ref|message_ref|attempt_ref|target_ref>")
 	case "approve":
 		return r.recordApproval(context.Background(), []string{"-h"}, "approved")
 	case "reject":

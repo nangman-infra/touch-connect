@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
+	"github.com/nangman-infra/touch-connect/internal/communication/governance"
 )
 
 type ServerClient interface {
@@ -182,4 +183,13 @@ func (s *Service) Artifact(ctx context.Context, ref string) (contracts.ArtifactR
 		}
 	}
 	return contracts.ArtifactRecord{}, false, nil
+}
+
+func (s *Service) ArtifactLineage(ctx context.Context, ref string) (contracts.ArtifactLineage, bool, error) {
+	snapshot, err := s.Snapshot(ctx)
+	if err != nil {
+		return contracts.ArtifactLineage{}, false, err
+	}
+	lineage, ok := governance.BuildArtifactLineage(ref, snapshot.Artifacts)
+	return lineage, ok, nil
 }

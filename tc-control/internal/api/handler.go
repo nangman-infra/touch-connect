@@ -53,12 +53,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.taskHistory(w, r)
 	case r.Method == http.MethodGet && path == "v1/artifacts":
 		h.artifacts(w, r)
+	case r.Method == http.MethodGet && path == "v1/artifacts/lineage":
+		h.artifactLineage(w, r)
 	case r.Method == http.MethodPost && path == "v1/artifacts/finalize":
 		h.finalizeArtifact(w, r)
 	case r.Method == http.MethodGet && path == "v1/artifacts/inspect":
 		h.artifact(w, r)
 	case r.Method == http.MethodGet && path == "v1/approvals":
 		h.approvals(w, r)
+	case r.Method == http.MethodGet && path == "v1/approvals/chain":
+		h.approvalChain(w, r)
 	case r.Method == http.MethodPost && path == "v1/approvals/decide":
 		h.recordApproval(w, r)
 	case r.Method == http.MethodGet && path == "v1/approvals/inspect":
@@ -163,6 +167,11 @@ func (h *Handler) artifact(w http.ResponseWriter, r *http.Request) {
 	writeLookupResult(w, value, ok, err)
 }
 
+func (h *Handler) artifactLineage(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.ArtifactLineage(r.Context(), r.URL.Query().Get("ref"))
+	writeLookupResult(w, value, ok, err)
+}
+
 func (h *Handler) finalizeArtifact(w http.ResponseWriter, r *http.Request) {
 	var req contracts.ArtifactFinalizeRequest
 	if !decodeJSON(w, r, &req) {
@@ -179,6 +188,11 @@ func (h *Handler) approvals(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) approval(w http.ResponseWriter, r *http.Request) {
 	value, ok, err := h.service.Approval(r.Context(), r.URL.Query().Get("ref"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) approvalChain(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.ApprovalChain(r.Context(), r.URL.Query().Get("ref"))
 	writeLookupResult(w, value, ok, err)
 }
 

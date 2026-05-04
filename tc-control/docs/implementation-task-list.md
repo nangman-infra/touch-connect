@@ -21,6 +21,26 @@ This document turns the `tc-control` Definition of Done into an implementation o
 [x] done
 ```
 
+## Current Implementation Checkpoint
+
+As of the CLI-first implementation slice, `tc-control` has a runnable HTTP API for:
+
+- health, readiness, and version
+- server-backed snapshot projection
+- endpoint, capability, task, message, artifact, approval, DLQ, and side-effect queries
+- message send
+- task cancel and retry
+- approval decision forwarding
+- artifact finalization
+- DLQ replay
+
+Known remaining gaps:
+
+- authn/authz is not enforced yet
+- mutation audit records are not persisted yet
+- read models are server-backed projections, not a dedicated projection store
+- admin compatibility is intentionally deferred while UI is excluded
+
 ## Milestone 0: Freeze Control-Plane Decisions
 
 Tasks:

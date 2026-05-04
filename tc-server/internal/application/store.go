@@ -25,6 +25,8 @@ type Store interface {
 	SaveReadback(readback domain.Readback) (domain.Readback, error)
 	SaveArtifactVersion(version domain.ArtifactVersion) error
 	GetArtifactVersion(artifactVersionRef string) (domain.ArtifactVersion, bool)
+	SaveArtifactFinalization(finalization domain.ArtifactFinalization) error
+	GetArtifactFinalization(artifactVersionRef string) (domain.ArtifactFinalization, bool)
 	SaveApprovalDecision(decision domain.ApprovalDecision) error
 	GetApprovalDecision(approvalRef string) (domain.ApprovalDecision, bool)
 	SaveSideEffectExecution(execution domain.SideEffectExecution) (domain.SideEffectExecution, bool, error)

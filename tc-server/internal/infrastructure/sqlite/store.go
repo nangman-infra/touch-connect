@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
   attempt_ref TEXT NOT NULL,
   body TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS artifact_finalizations (
+  artifact_version_ref TEXT PRIMARY KEY,
+  finalization_ref TEXT NOT NULL UNIQUE,
+  body TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS dead_letters (
   dead_letter_ref TEXT PRIMARY KEY,
   body TEXT NOT NULL

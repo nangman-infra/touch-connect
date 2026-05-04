@@ -24,6 +24,26 @@ Use this as the development checklist for the MVP operator CLI. The DoD says whe
 [x] done
 ```
 
+## Current Implementation Checkpoint
+
+As of the CLI-first implementation slice, `tcctl` has a runnable command surface for:
+
+- server health/version
+- endpoint list/inspect/capabilities
+- task create/status/history/cancel/retry
+- message send/list/inspect/history
+- artifact list/inspect/finalize
+- approval list/inspect/approve/reject
+- DLQ list/inspect/replay
+- canonical scenario run/verify
+
+Known remaining gaps:
+
+- auth material is not enforced by middleware yet
+- mutation audit is not persisted yet
+- `scenario verify canonical` only verifies available records and reports missing proof as failure
+- release packaging and shell completion are not implemented yet
+
 ## Milestone 0: Freeze CLI Decisions
 
 Goal: remove decisions that would otherwise be made while adding commands.

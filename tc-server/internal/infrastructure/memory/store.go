@@ -11,30 +11,32 @@ import (
 )
 
 type Store struct {
-	mu          sync.Mutex
-	sequence    int
-	endpoints   map[string]domain.Endpoint
-	messages    map[string]domain.Message
-	attempts    map[string]domain.Attempt
-	checkpoints map[string][]domain.Checkpoint
-	readbacks   map[string][]domain.Readback
-	artifacts   map[string]domain.ArtifactVersion
-	deadLetters map[string]domain.DeadLetter
-	approvals   map[string]domain.ApprovalDecision
-	sideEffects map[string]domain.SideEffectExecution
+	mu            sync.Mutex
+	sequence      int
+	endpoints     map[string]domain.Endpoint
+	messages      map[string]domain.Message
+	attempts      map[string]domain.Attempt
+	checkpoints   map[string][]domain.Checkpoint
+	readbacks     map[string][]domain.Readback
+	artifacts     map[string]domain.ArtifactVersion
+	finalizations map[string]domain.ArtifactFinalization
+	deadLetters   map[string]domain.DeadLetter
+	approvals     map[string]domain.ApprovalDecision
+	sideEffects   map[string]domain.SideEffectExecution
 }
 
 func NewStore() *Store {
 	return &Store{
-		endpoints:   map[string]domain.Endpoint{},
-		messages:    map[string]domain.Message{},
-		attempts:    map[string]domain.Attempt{},
-		checkpoints: map[string][]domain.Checkpoint{},
-		readbacks:   map[string][]domain.Readback{},
-		artifacts:   map[string]domain.ArtifactVersion{},
-		deadLetters: map[string]domain.DeadLetter{},
-		approvals:   map[string]domain.ApprovalDecision{},
-		sideEffects: map[string]domain.SideEffectExecution{},
+		endpoints:     map[string]domain.Endpoint{},
+		messages:      map[string]domain.Message{},
+		attempts:      map[string]domain.Attempt{},
+		checkpoints:   map[string][]domain.Checkpoint{},
+		readbacks:     map[string][]domain.Readback{},
+		artifacts:     map[string]domain.ArtifactVersion{},
+		finalizations: map[string]domain.ArtifactFinalization{},
+		deadLetters:   map[string]domain.DeadLetter{},
+		approvals:     map[string]domain.ApprovalDecision{},
+		sideEffects:   map[string]domain.SideEffectExecution{},
 	}
 }
 
@@ -264,6 +266,20 @@ func (s *Store) GetArtifactVersion(artifactVersionRef string) (domain.ArtifactVe
 	return version, ok
 }
 
+func (s *Store) SaveArtifactFinalization(finalization domain.ArtifactFinalization) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finalizations[finalization.ArtifactVersionRef] = finalization
+	return nil
+}
+
+func (s *Store) GetArtifactFinalization(artifactVersionRef string) (domain.ArtifactFinalization, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	finalization, ok := s.finalizations[artifactVersionRef]
+	return finalization, ok
+}
+
 func (s *Store) SaveApprovalDecision(decision domain.ApprovalDecision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -345,15 +361,16 @@ func (s *Store) Snapshot() domain.Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return domain.Snapshot{
-		Endpoints:   sortedMapValues(s.endpoints, func(item domain.Endpoint) string { return item.EndpointRef }),
-		Messages:    sortedMapValues(s.messages, func(item domain.Message) string { return item.MessageRef }),
-		Attempts:    sortedMapValues(s.attempts, func(item domain.Attempt) string { return item.AttemptRef }),
-		Checkpoints: flattenCheckpoints(s.checkpoints),
-		Readbacks:   flattenReadbacks(s.readbacks),
-		Artifacts:   sortedMapValues(s.artifacts, func(item domain.ArtifactVersion) string { return item.ArtifactVersionRef }),
-		DeadLetters: sortedMapValues(s.deadLetters, func(item domain.DeadLetter) string { return item.DeadLetterRef }),
-		Approvals:   sortedMapValues(s.approvals, func(item domain.ApprovalDecision) string { return item.ApprovalRef }),
-		SideEffects: sortedMapValues(s.sideEffects, func(item domain.SideEffectExecution) string { return item.SideEffectExecutionRef }),
+		Endpoints:     sortedMapValues(s.endpoints, func(item domain.Endpoint) string { return item.EndpointRef }),
+		Messages:      sortedMapValues(s.messages, func(item domain.Message) string { return item.MessageRef }),
+		Attempts:      sortedMapValues(s.attempts, func(item domain.Attempt) string { return item.AttemptRef }),
+		Checkpoints:   flattenCheckpoints(s.checkpoints),
+		Readbacks:     flattenReadbacks(s.readbacks),
+		Artifacts:     sortedMapValues(s.artifacts, func(item domain.ArtifactVersion) string { return item.ArtifactVersionRef }),
+		Finalizations: sortedMapValues(s.finalizations, func(item domain.ArtifactFinalization) string { return item.ArtifactVersionRef }),
+		DeadLetters:   sortedMapValues(s.deadLetters, func(item domain.DeadLetter) string { return item.DeadLetterRef }),
+		Approvals:     sortedMapValues(s.approvals, func(item domain.ApprovalDecision) string { return item.ApprovalRef }),
+		SideEffects:   sortedMapValues(s.sideEffects, func(item domain.SideEffectExecution) string { return item.SideEffectExecutionRef }),
 	}
 }
 

@@ -15,6 +15,7 @@ const (
 	AttemptStateOrphaned             = "orphaned"
 	AttemptStateCompleted            = "completed"
 	AttemptStateFailed               = "failed"
+	AttemptStateCanceled             = "canceled"
 	MessageStateAvailable            = "available"
 	MessageStateClaimed              = "claimed"
 	MessageStateProcessing           = "processing"
@@ -23,6 +24,7 @@ const (
 	MessageStateCompleted            = "completed"
 	MessageStateFailed               = "failed"
 	MessageStateDeadLettered         = "dead_lettered"
+	MessageStateCanceled             = "canceled"
 	EndpointStateOnline              = "online"
 	EndpointStateStale               = "stale"
 	EndpointStateOffline             = "offline"
@@ -110,6 +112,14 @@ type ArtifactVersion struct {
 	MessageRef                 string
 	AttemptRef                 string
 	CreatedAt                  time.Time
+}
+
+type ArtifactFinalization struct {
+	ArtifactVersionRef string
+	FinalizationRef    string
+	FinalizedByActorID string
+	Reason             string
+	FinalizedAt        time.Time
 }
 
 type Readback struct {
@@ -203,13 +213,14 @@ type ClaimNextRequest struct {
 }
 
 type Snapshot struct {
-	Endpoints   []Endpoint
-	Messages    []Message
-	Attempts    []Attempt
-	Checkpoints []Checkpoint
-	Readbacks   []Readback
-	Artifacts   []ArtifactVersion
-	DeadLetters []DeadLetter
-	Approvals   []ApprovalDecision
-	SideEffects []SideEffectExecution
+	Endpoints     []Endpoint
+	Messages      []Message
+	Attempts      []Attempt
+	Checkpoints   []Checkpoint
+	Readbacks     []Readback
+	Artifacts     []ArtifactVersion
+	Finalizations []ArtifactFinalization
+	DeadLetters   []DeadLetter
+	Approvals     []ApprovalDecision
+	SideEffects   []SideEffectExecution
 }

@@ -30,6 +30,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, health)
 	case r.Method == http.MethodGet && path == "version":
 		writeJSON(w, http.StatusOK, h.service.Version())
+	case r.Method == http.MethodGet && path == "v1/control/snapshot":
+		writeJSON(w, http.StatusOK, h.service.SnapshotResponse())
+	case r.Method == http.MethodPost && path == "v1/control/tasks/cancel":
+		h.cancelTask(w, r)
+	case r.Method == http.MethodPost && path == "v1/control/tasks/retry":
+		h.retryTask(w, r)
+	case r.Method == http.MethodPost && path == "v1/control/dlq/replay":
+		h.replayDeadLetter(w, r)
+	case r.Method == http.MethodPost && path == "v1/control/artifacts/finalize":
+		h.finalizeArtifact(w, r)
 	case r.Method == http.MethodPost && path == "v1/endpoints/register":
 		h.registerEndpoint(w, r)
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/endpoints/") && strings.HasSuffix(path, "/heartbeat"):
@@ -96,6 +106,42 @@ func (h *Handler) ingressMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.service.IngressMessage(req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) cancelTask(w http.ResponseWriter, r *http.Request) {
+	var req contracts.TaskCommandRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.CancelTask(req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) retryTask(w http.ResponseWriter, r *http.Request) {
+	var req contracts.TaskCommandRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.RetryTask(req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) replayDeadLetter(w http.ResponseWriter, r *http.Request) {
+	var req contracts.DLQReplayRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.ReplayDeadLetter(req)
+	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) finalizeArtifact(w http.ResponseWriter, r *http.Request) {
+	var req contracts.ArtifactFinalizeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := h.service.FinalizeArtifact(req)
 	writeResult(w, http.StatusAccepted, res, err)
 }
 

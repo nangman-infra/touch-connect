@@ -1,0 +1,254 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
+	"github.com/nangman-infra/touch-connect/tc-control/internal/application"
+)
+
+type Handler struct {
+	service *application.Service
+}
+
+func NewHandler(service *application.Service) *Handler {
+	return &Handler{service: service}
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(r.URL.Path, "/")
+	switch {
+	case r.Method == http.MethodGet && path == "healthz":
+		writeJSON(w, http.StatusOK, h.service.Health())
+	case r.Method == http.MethodGet && path == "readyz":
+		h.ready(w, r)
+	case r.Method == http.MethodGet && path == "version":
+		h.version(w, r)
+	case r.Method == http.MethodGet && path == "v1/snapshot":
+		h.snapshot(w, r)
+	case r.Method == http.MethodGet && path == "v1/endpoints":
+		h.endpoints(w, r)
+	case r.Method == http.MethodGet && path == "v1/endpoints/inspect":
+		h.endpoint(w, r)
+	case r.Method == http.MethodGet && path == "v1/capabilities":
+		h.capabilities(w, r)
+	case r.Method == http.MethodGet && path == "v1/messages":
+		h.messages(w, r)
+	case r.Method == http.MethodPost && path == "v1/messages":
+		h.sendMessage(w, r)
+	case r.Method == http.MethodGet && path == "v1/messages/inspect":
+		h.message(w, r)
+	case r.Method == http.MethodGet && path == "v1/messages/history":
+		h.messages(w, r)
+	case r.Method == http.MethodGet && path == "v1/tasks/status":
+		h.taskStatus(w, r)
+	case r.Method == http.MethodPost && path == "v1/tasks/cancel":
+		h.cancelTask(w, r)
+	case r.Method == http.MethodPost && path == "v1/tasks/retry":
+		h.retryTask(w, r)
+	case r.Method == http.MethodGet && path == "v1/tasks/history":
+		h.taskHistory(w, r)
+	case r.Method == http.MethodGet && path == "v1/artifacts":
+		h.artifacts(w, r)
+	case r.Method == http.MethodPost && path == "v1/artifacts/finalize":
+		h.finalizeArtifact(w, r)
+	case r.Method == http.MethodGet && path == "v1/artifacts/inspect":
+		h.artifact(w, r)
+	case r.Method == http.MethodGet && path == "v1/approvals":
+		h.approvals(w, r)
+	case r.Method == http.MethodPost && path == "v1/approvals/decide":
+		h.recordApproval(w, r)
+	case r.Method == http.MethodGet && path == "v1/approvals/inspect":
+		h.approval(w, r)
+	case r.Method == http.MethodGet && path == "v1/dlq":
+		h.deadLetters(w, r)
+	case r.Method == http.MethodPost && path == "v1/dlq/replay":
+		h.replayDeadLetter(w, r)
+	case r.Method == http.MethodGet && path == "v1/dlq/inspect":
+		h.deadLetter(w, r)
+	case r.Method == http.MethodGet && path == "v1/side-effects":
+		h.sideEffects(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+	}
+}
+
+func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Ready(r.Context())
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) version(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Version(r.Context())
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) snapshot(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Snapshot(r.Context())
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) endpoints(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Endpoints(r.Context())
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) endpoint(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.Endpoint(r.Context(), r.URL.Query().Get("ref"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) capabilities(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Capabilities(r.Context())
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) messages(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Messages(r.Context(), r.URL.Query().Get("task"))
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) message(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.Message(r.Context(), r.URL.Query().Get("ref"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) {
+	var req contracts.MessageIngressRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	value, err := h.service.SendMessage(r.Context(), req)
+	writeResult(w, http.StatusAccepted, value, err)
+}
+
+func (h *Handler) taskStatus(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.TaskStatus(r.Context(), r.URL.Query().Get("task"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) taskHistory(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.TaskHistory(r.Context(), r.URL.Query().Get("task"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) cancelTask(w http.ResponseWriter, r *http.Request) {
+	var req contracts.TaskCommandRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	value, err := h.service.CancelTask(r.Context(), req)
+	writeResult(w, http.StatusAccepted, value, err)
+}
+
+func (h *Handler) retryTask(w http.ResponseWriter, r *http.Request) {
+	var req contracts.TaskCommandRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	value, err := h.service.RetryTask(r.Context(), req)
+	writeResult(w, http.StatusAccepted, value, err)
+}
+
+func (h *Handler) artifacts(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Artifacts(r.Context(), r.URL.Query().Get("task"))
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) artifact(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.Artifact(r.Context(), r.URL.Query().Get("ref"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) finalizeArtifact(w http.ResponseWriter, r *http.Request) {
+	var req contracts.ArtifactFinalizeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	value, err := h.service.FinalizeArtifact(r.Context(), req)
+	writeResult(w, http.StatusAccepted, value, err)
+}
+
+func (h *Handler) approvals(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.Approvals(r.Context())
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) approval(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.Approval(r.Context(), r.URL.Query().Get("ref"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) recordApproval(w http.ResponseWriter, r *http.Request) {
+	var req contracts.ApprovalCommandRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	value, err := h.service.RecordApproval(r.Context(), req)
+	writeResult(w, http.StatusAccepted, value, err)
+}
+
+func (h *Handler) deadLetters(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.DeadLetters(r.Context())
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func (h *Handler) deadLetter(w http.ResponseWriter, r *http.Request) {
+	value, ok, err := h.service.DeadLetter(r.Context(), r.URL.Query().Get("ref"))
+	writeLookupResult(w, value, ok, err)
+}
+
+func (h *Handler) replayDeadLetter(w http.ResponseWriter, r *http.Request) {
+	var req contracts.DLQReplayRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	value, err := h.service.ReplayDeadLetter(r.Context(), req)
+	writeResult(w, http.StatusAccepted, value, err)
+}
+
+func (h *Handler) sideEffects(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.SideEffects(r.Context(), r.URL.Query().Get("task"))
+	writeResult(w, http.StatusOK, value, err)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "request body must be valid json")
+		return false
+	}
+	return true
+}
+
+func writeLookupResult(w http.ResponseWriter, value any, ok bool, err error) {
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "server_unavailable", err.Error())
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "record not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func writeResult(w http.ResponseWriter, status int, value any, err error) {
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "server_unavailable", err.Error())
+		return
+	}
+	writeJSON(w, status, value)
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, code string, message string) {
+	writeJSON(w, status, contracts.ErrorResponse{Code: code, Message: message})
+}

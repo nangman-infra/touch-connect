@@ -31,3 +31,26 @@ func (s *Store) GetArtifactVersion(artifactVersionRef string) (domain.ArtifactVe
 	version, err := decode[domain.ArtifactVersion](body)
 	return version, err == nil
 }
+
+func (s *Store) SaveArtifactFinalization(finalization domain.ArtifactFinalization) error {
+	body, err := encode(finalization)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT OR REPLACE INTO artifact_finalizations(artifact_version_ref, finalization_ref, body) VALUES(?, ?, ?)`,
+		finalization.ArtifactVersionRef, finalization.FinalizationRef, body)
+	return err
+}
+
+func (s *Store) GetArtifactFinalization(artifactVersionRef string) (domain.ArtifactFinalization, bool) {
+	var body string
+	err := s.db.QueryRow(`SELECT body FROM artifact_finalizations WHERE artifact_version_ref = ?`, artifactVersionRef).Scan(&body)
+	if err == sql.ErrNoRows {
+		return domain.ArtifactFinalization{}, false
+	}
+	if err != nil {
+		return domain.ArtifactFinalization{}, false
+	}
+	finalization, err := decode[domain.ArtifactFinalization](body)
+	return finalization, err == nil
+}

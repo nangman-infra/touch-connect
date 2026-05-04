@@ -90,7 +90,7 @@ func ValidateCheckpoint(req contracts.CheckpointRequest) error {
 		return ErrInvalidInput
 	}
 	switch req.State {
-	case AttemptStateClaimed, AttemptStateValidating, AttemptStateBlockedMissingFields, AttemptStateInProgress, AttemptStateRetrying, AttemptStateCompleted, AttemptStateFailed:
+	case AttemptStateClaimed, AttemptStateValidating, AttemptStateBlockedMissingFields, AttemptStateInProgress, AttemptStateRetrying, AttemptStateCompleted, AttemptStateFailed, AttemptStateCanceled:
 	default:
 		return ErrInvalidInput
 	}

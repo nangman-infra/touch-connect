@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -10,15 +11,22 @@ import (
 
 type Service struct {
 	store    Store
+	refs     RefAllocator
 	settings Settings
 }
 
-func NewService(store Store, settings Settings) (*Service, error) {
+func NewService(store Store, refs RefAllocator, settings Settings) (*Service, error) {
+	if store == nil {
+		return nil, errors.New("store is required")
+	}
+	if refs == nil {
+		return nil, errors.New("ref allocator is required")
+	}
 	accepted, err := settings.Validated()
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, settings: accepted}, nil
+	return &Service{store: store, refs: refs, settings: accepted}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {
@@ -55,7 +63,7 @@ func (s *Service) RegisterEndpoint(req contracts.EndpointRegistrationRequest) (c
 	}
 	return contracts.EndpointRegistrationResponse{
 		EndpointRef: endpoint.EndpointRef,
-		AcceptedRef: s.store.NextRef("accepted"),
+		AcceptedRef: s.refs.NextRef("accepted"),
 	}, nil
 }
 
@@ -110,11 +118,11 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 	}
 	messageRef := req.MessageRef
 	if messageRef == "" {
-		messageRef = s.store.NextRef("message")
+		messageRef = s.refs.NextRef("message")
 	}
 	message := domain.Message{
 		MessageRef:        messageRef,
-		DeliveryRef:       s.store.NextRef("delivery"),
+		DeliveryRef:       s.refs.NextRef("delivery"),
 		SenderEndpointRef: req.SenderEndpointRef,
 		TargetCapability:  req.TargetCapability,
 		Payload:           req.Payload,
@@ -152,8 +160,8 @@ func (s *Service) ClaimMessage(messageRef string, req contracts.ClaimMessageRequ
 	result, err := s.store.ClaimMessage(domain.ClaimRequest{
 		MessageRef:     message.MessageRef,
 		Endpoint:       endpoint,
-		AttemptRef:     s.store.NextRef("attempt"),
-		DeadLetterRef:  s.store.NextRef("dead-letter"),
+		AttemptRef:     s.refs.NextRef("attempt"),
+		DeadLetterRef:  s.refs.NextRef("dead-letter"),
 		LeaseExpiresAt: leaseExpiresAt,
 		Now:            s.now(),
 		MaxRedelivery:  s.settings.MaxRedelivery,
@@ -211,7 +219,7 @@ func (s *Service) SubmitCheckpoint(attemptRef string, req contracts.CheckpointRe
 		return contracts.CheckpointResponse{}, err
 	}
 	checkpoint := domain.Checkpoint{
-		CheckpointRef:     s.store.NextRef("checkpoint"),
+		CheckpointRef:     s.refs.NextRef("checkpoint"),
 		AttemptRef:        attempt.AttemptRef,
 		EndpointRef:       req.EndpointRef,
 		State:             req.State,
@@ -256,7 +264,7 @@ func (s *Service) SubmitReadback(attemptRef string, req contracts.ReadbackReques
 		return contracts.ReadbackResponse{}, domain.ErrLeaseExpired
 	}
 	readback := domain.Readback{
-		ReadbackRef:    s.store.NextRef("readback"),
+		ReadbackRef:    s.refs.NextRef("readback"),
 		AttemptRef:     attempt.AttemptRef,
 		EndpointRef:    req.EndpointRef,
 		Summary:        req.Summary,

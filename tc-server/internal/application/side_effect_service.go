@@ -69,7 +69,7 @@ func (s *Service) StartSideEffectExecution(attemptRef string, req contracts.Side
 		return contracts.SideEffectExecutionResponse{}, err
 	}
 	execution := domain.SideEffectExecution{
-		SideEffectExecutionRef: s.store.NextRef("side-effect"),
+		SideEffectExecutionRef: s.refs.NextRef("side-effect"),
 		IdempotencyKey:         req.IdempotencyKey,
 		ProtectedScope:         req.ProtectedScope,
 		ApprovalRef:            approval.ApprovalRef,

@@ -1,6 +1,7 @@
 package tcserver
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/nangman-infra/touch-connect/tc-server/internal/adapters/api"
@@ -43,7 +44,15 @@ func NewSQLiteServer(path string, settings application.Settings) (*Server, error
 }
 
 func NewServerWithStore(store application.Store, settings application.Settings) (*Server, error) {
-	service, err := application.NewService(store, settings)
+	refs, ok := store.(application.RefAllocator)
+	if !ok {
+		return nil, errors.New("store must provide ref allocator")
+	}
+	return NewServerWithPorts(store, refs, settings)
+}
+
+func NewServerWithPorts(store application.Store, refs application.RefAllocator, settings application.Settings) (*Server, error) {
+	service, err := application.NewService(store, refs, settings)
 	if err != nil {
 		return nil, err
 	}

@@ -17,7 +17,7 @@ func (s *Service) FinalizeArtifact(req contracts.ArtifactFinalizeRequest) (contr
 	}
 	finalization := domain.ArtifactFinalization{
 		ArtifactVersionRef: req.ArtifactVersionRef,
-		FinalizationRef:    s.store.NextRef("artifact-finalization"),
+		FinalizationRef:    s.refs.NextRef("artifact-finalization"),
 		FinalizedByActorID: req.ActorID,
 		Reason:             req.Reason,
 		FinalizedAt:        s.now(),

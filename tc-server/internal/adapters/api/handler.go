@@ -9,6 +9,7 @@ import (
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
 	"github.com/nangman-infra/touch-connect/tc-server/internal/application"
 	"github.com/nangman-infra/touch-connect/tc-server/internal/domain"
+	a2aadapter "github.com/nangman-infra/touch-connect/tc-server/internal/infrastructure/a2a"
 )
 
 type Handler struct {
@@ -30,6 +31,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, health)
 	case r.Method == http.MethodGet && path == "version":
 		writeJSON(w, http.StatusOK, h.service.Version())
+	case r.Method == http.MethodGet && path == ".well-known/agent.json":
+		h.a2aAgentCard(w, r)
+	case r.Method == http.MethodPost && (path == "a2a/rpc" || path == "v1/a2a/rpc"):
+		h.a2aRPC(w, r)
 	case r.Method == http.MethodGet && path == "v1/control/snapshot":
 		writeJSON(w, http.StatusOK, h.service.SnapshotResponse())
 	case r.Method == http.MethodPost && path == "v1/control/tasks/cancel":
@@ -107,6 +112,75 @@ func (h *Handler) ingressMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.service.IngressMessage(req)
 	writeResult(w, http.StatusAccepted, res, err)
+}
+
+func (h *Handler) a2aAgentCard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("A2A-Version", a2aadapter.ProtocolVersion)
+	card := a2aadapter.AgentCardFromSnapshot(a2aBaseURL(r), h.service.SnapshotResponse(), h.service.Version().Version)
+	writeJSON(w, http.StatusOK, card)
+}
+
+func (h *Handler) a2aRPC(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("A2A-Version", a2aadapter.ProtocolVersion)
+	if !a2aadapter.VersionSupported(r.Header.Get("A2A-Version")) {
+		writeA2AResponse(w, a2aadapter.ErrorResponse(nil, a2aadapter.ErrorVersionUnsupported, a2aadapter.ErrVersionNotSupported.Error(), map[string]any{
+			"supported_version": a2aadapter.ProtocolVersion,
+		}))
+		return
+	}
+	defer r.Body.Close()
+	var rpc a2aadapter.JSONRPCRequest
+	if err := json.NewDecoder(r.Body).Decode(&rpc); err != nil {
+		writeA2AResponse(w, a2aadapter.ErrorResponse(nil, a2aadapter.ErrorParse, "Invalid JSON payload", nil))
+		return
+	}
+	if err := a2aadapter.ValidateJSONRPCRequest(rpc); err != nil {
+		writeA2AResponse(w, a2aadapter.ErrorResponse(rpc.ID, a2aadapter.ErrorInvalidRequest, err.Error(), nil))
+		return
+	}
+	switch rpc.Method {
+	case a2aadapter.MethodSendMessage:
+		h.a2aSendMessage(w, rpc)
+	case a2aadapter.MethodGetTask:
+		h.a2aGetTask(w, rpc)
+	default:
+		writeA2AResponse(w, a2aadapter.ErrorResponse(rpc.ID, a2aadapter.ErrorMethodNotFound, a2aadapter.ErrUnsupportedA2AMethod.Error(), map[string]any{
+			"method": rpc.Method,
+		}))
+	}
+}
+
+func (h *Handler) a2aSendMessage(w http.ResponseWriter, rpc a2aadapter.JSONRPCRequest) {
+	req, err := a2aadapter.DecodeSendMessageRequest(rpc.Params)
+	if err != nil {
+		writeA2AError(w, rpc.ID, err)
+		return
+	}
+	ingress, err := a2aadapter.MessageIngressRequest(req)
+	if err != nil {
+		writeA2AError(w, rpc.ID, err)
+		return
+	}
+	accepted, err := h.service.IngressMessage(ingress)
+	if err != nil {
+		writeA2AError(w, rpc.ID, err)
+		return
+	}
+	writeA2AResponse(w, a2aadapter.ResultResponse(rpc.ID, a2aadapter.SendMessageResponseFromIngress(req, accepted)))
+}
+
+func (h *Handler) a2aGetTask(w http.ResponseWriter, rpc a2aadapter.JSONRPCRequest) {
+	req, err := a2aadapter.DecodeGetTaskRequest(rpc.Params)
+	if err != nil {
+		writeA2AError(w, rpc.ID, err)
+		return
+	}
+	task, ok := a2aadapter.TaskFromSnapshot(req.ID, h.service.SnapshotResponse())
+	if !ok {
+		writeA2AError(w, rpc.ID, a2aadapter.ErrTaskNotFound)
+		return
+	}
+	writeA2AResponse(w, a2aadapter.ResultResponse(rpc.ID, task))
 }
 
 func (h *Handler) cancelTask(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +372,31 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 
 func writeErrorResponse(w http.ResponseWriter, status int, response contracts.ErrorResponse) {
 	writeJSON(w, status, response)
+}
+
+func writeA2AError(w http.ResponseWriter, id any, err error) {
+	writeA2AResponse(w, a2aadapter.ErrorResponse(id, a2aadapter.ErrorCode(err), err.Error(), map[string]any{
+		"reason": err.Error(),
+	}))
+}
+
+func writeA2AResponse(w http.ResponseWriter, response a2aadapter.JSONRPCResponse) {
+	writeJSON(w, http.StatusOK, response)
+}
+
+func a2aBaseURL(r *http.Request) string {
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	return scheme + "://" + host
 }
 
 func endpointRefFromPath(path string, suffix string) string {

@@ -1,0 +1,70 @@
+# JetStream Adapter Contract
+
+This directory is reserved for the production NATS JetStream adapter.
+
+The adapter must implement transport-facing behavior without changing public
+`tc://...` refs or application ledger semantics.
+
+## Port Mapping
+
+| touch-connect port | JetStream responsibility |
+| --- | --- |
+| `MessageLedger` | Persist logical message state outside broker-native sequence ids. |
+| `ProcessingLedger` | Own domain claim, lease, attempt, checkpoint, and expired-claim reconciliation. |
+| `ReadbackLedger` | Persist readback evidence as handoff quality data, not broker ack data. |
+| `ArtifactLedger` | Persist artifact version/finalization and lineage metadata outside stream retention. |
+| `GovernanceLedger` | Persist approval decisions and protected side effect execution records. |
+| `ProjectionReader` | Build operator-facing read models from ledgers and adapter metadata. |
+| `RefAllocator` | Create public `tc://...` refs; never use stream sequence as public identity. |
+| `DeliveryAdapter` | Publish/fetch/ack/nak JetStream messages and preserve adapter metadata. |
+
+## JetStream Mapping
+
+| JetStream feature | Adapter rule |
+| --- | --- |
+| `Nats-Msg-Id` | Use for publish dedupe. It does not prove side effect exactly-once. |
+| `WorkQueuePolicy` | Use for work distribution. It does not replace task history. |
+| pull consumer fetch | Map to `DeliveryAdapter.FetchNextDelivery`, then call `ProcessingLedger` for domain claim. |
+| `AckExplicit` | Ack only after terminal domain checkpoint and message state update succeed. |
+| `AckWait` | Feed lease/reconcile decisions; do not expose it as a domain state. |
+| `MaxDeliver` | Preserve as adapter redelivery metadata and map into `max_redelivery` policy. |
+
+## Subject Convention
+
+```text
+tc.messages.<capability>
+tc.events.attempt.<state>
+tc.events.governance.<kind>
+tc.events.artifact.<kind>
+```
+
+## Metadata Convention
+
+```text
+tc_message_ref
+tc_delivery_ref
+tc_attempt_ref
+tc_correlation_ref
+tc_capability
+adapter_stream
+adapter_consumer
+adapter_stream_seq
+adapter_consumer_seq
+```
+
+Adapter metadata is for troubleshooting, replay input, and trace correlation.
+It must not replace `message_ref`, `attempt_ref`, `correlation_ref`, approval
+refs, or artifact version refs in API responses or CLI output.
+
+## Implementation Gate
+
+The first concrete implementation in this directory must add an integration
+test profile that requires a JetStream-enabled NATS service. The default
+`go test ./...` path must continue to run without external services.
+
+## Sources
+
+- NATS JetStream: https://docs.nats.io/nats-concepts/jetstream
+- NATS JetStream streams: https://docs.nats.io/nats-concepts/jetstream/streams
+- NATS JetStream consumers: https://docs.nats.io/nats-concepts/jetstream/consumers
+- NATS JetStream headers: https://docs.nats.io/nats-concepts/jetstream/headers

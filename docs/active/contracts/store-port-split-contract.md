@@ -3,7 +3,7 @@
 > Scope: tc-server application store를 transport-agnostic ports로 분리하는 계약
 > Canonical Path: `docs/active/contracts/store-port-split-contract.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-05-04
+> Last Reviewed: 2026-05-05
 > Supersedes: `none`
 > Superseded By: `none`
 
@@ -22,7 +22,25 @@
 
 ## 현재 문제
 
-현재 `Store` interface는 빠른 e2e 검증에는 유용하지만 production adapter 계약으로는 너무 넓다.
+현재 `Store` interface는 production write contract가 아니라 dev/test composite marker다.
+
+`Service`와 `NewServerWithPorts`는 아래 개별 port를 직접 받는다.
+
+```text
+EndpointRegistry
+MessageLedger
+ProcessingLedger
+ReadbackLedger
+ArtifactLedger
+GovernanceLedger
+RefAllocator
+ProjectionReader
+```
+
+남은 문제는 concrete memory/SQLite store가 아직 모든 port를 한 struct에서 구현한다는 점이다.
+이는 local dev/test conformance adapter로는 허용하지만 production adapter의 기본 형태가 되면 안 된다.
+
+분리 전 넓은 `Store` interface는 빠른 e2e 검증에는 유용했지만 production adapter 계약으로는 너무 넓었다.
 
 현재 포함된 책임:
 
@@ -43,9 +61,9 @@ snapshot projection
 
 문제는 세 가지다.
 
-1. `NextRef(kind string)`이 store에 붙어 있어 ref 생성이 persistence 구현 세부사항처럼 보인다.
-2. `Snapshot()`이 write store에 붙어 있어 production query/projection과 write ledger 경계가 섞인다.
-3. `ClaimMessage`와 `ClaimNextMessage`가 domain claim, adapter fetch, lease, redelivery를 한 port에 묶는다.
+1. concrete memory/SQLite store가 여전히 모든 port를 구현하므로 production adapter 단위 테스트가 없으면 다시 넓어질 수 있다.
+2. `ClaimMessage`와 `ClaimNextMessage`는 아직 domain claim과 adapter fetch 분리 전 단계다.
+3. JetStream consumer ack와 domain attempt completion의 연결 지점이 아직 DeliveryAdapter로 코드화되지 않았다.
 
 이 상태로 JetStream adapter를 붙이면 JetStream consumer ack, stream sequence, durable consumer state가 domain store로 새어 들어갈 가능성이 크다.
 
@@ -142,7 +160,7 @@ AppendQualityDecision(decision)
 
 ### ProcessingLedger
 
-claim, lease, attempt, checkpoint, readback을 소유한다.
+claim, lease, attempt, checkpoint를 소유한다.
 
 ```text
 ClaimMessage(claim_request)
@@ -151,7 +169,6 @@ SaveAttempt(attempt)
 GetAttempt(attempt_ref)
 UpdateAttempt(attempt)
 SaveCheckpoint(checkpoint)
-SaveReadback(readback)
 ReconcileExpiredClaims(now)
 ```
 
@@ -161,6 +178,20 @@ ReconcileExpiredClaims(now)
 - attempt는 endpoint가 message를 한 번 맡은 실행 단위다.
 - `ReconcileExpiredClaims`는 production에서는 adapter timer나 processing service가 호출한다.
 - adapter ack timeout은 expired claim reconciliation의 input일 수 있지만 domain state name이 되면 안 된다.
+
+### ReadbackLedger
+
+receiver understanding evidence를 소유한다.
+
+```text
+SaveReadback(readback)
+```
+
+규칙:
+
+- readback은 processing checkpoint가 아니라 handoff quality evidence다.
+- readback 저장은 ack, claim, completion을 뜻하지 않는다.
+- PhraseologyPolicy와 연결될 수 있지만 transport adapter ack로 대체하면 안 된다.
 
 ### ArtifactLedger
 
@@ -182,11 +213,14 @@ AppendArtifactLineage(edge)
 
 ### GovernanceLedger
 
-approval, identity binding, approval chain을 소유한다.
+approval, identity binding, approval chain, protected side effect execution을 소유한다.
 
 ```text
 SaveApprovalDecision(decision)
 GetApprovalDecision(approval_ref)
+SaveSideEffectExecution(execution)
+GetSideEffectExecution(execution_ref)
+UpdateSideEffectExecution(execution)
 AppendApprovalChainEvent(event)
 GetApprovalChain(ref)
 ```
@@ -196,20 +230,6 @@ GetApprovalChain(ref)
 - approval은 실행 허가이지 side effect 결과가 아니다.
 - scope widening은 재승인 대상이다.
 - scope narrowing은 approval chain re-binding으로 처리할 수 있다.
-
-### SideEffectLedger
-
-protected side effect execution uniqueness를 소유한다.
-
-```text
-SaveSideEffectExecution(execution)
-GetSideEffectExecution(execution_ref)
-UpdateSideEffectExecution(execution)
-GetSideEffectExecutionByIdempotency(scope, idempotency_key)
-```
-
-규칙:
-
 - `idempotency_key + protected_scope`가 uniqueness boundary다.
 - execution record 없이 외부 side effect를 시작하면 contract violation이다.
 - unknown external result는 success로 dedupe하지 않는다.
@@ -286,19 +306,19 @@ MapAdapterRedelivery(delivery_ref, adapter_metadata)
 | `GetAttempt` | `ProcessingLedger` | 그대로 이동 |
 | `UpdateAttempt` | `ProcessingLedger` | 그대로 이동 |
 | `SaveCheckpoint` | `ProcessingLedger` | 그대로 이동 |
-| `SaveReadback` | `ProcessingLedger` | 그대로 이동 |
+| `SaveReadback` | `ReadbackLedger` | handoff quality evidence로 분리 |
 | `SaveArtifactVersion` | `ArtifactLedger` | lineage edge 추가 필요 |
 | `GetArtifactVersion` | `ArtifactLedger` | 그대로 이동 |
 | `SaveArtifactFinalization` | `ArtifactLedger` | 그대로 이동 |
 | `GetArtifactFinalization` | `ArtifactLedger` | 그대로 이동 |
 | `SaveApprovalDecision` | `GovernanceLedger` | ApprovalChain event 추가 필요 |
 | `GetApprovalDecision` | `GovernanceLedger` | 그대로 이동 |
-| `SaveSideEffectExecution` | `SideEffectLedger` | idempotency lookup 추가 필요 |
-| `GetSideEffectExecution` | `SideEffectLedger` | 그대로 이동 |
-| `UpdateSideEffectExecution` | `SideEffectLedger` | 그대로 이동 |
+| `SaveSideEffectExecution` | `GovernanceLedger` | approval-enforced execution ledger |
+| `GetSideEffectExecution` | `GovernanceLedger` | 그대로 이동 |
+| `UpdateSideEffectExecution` | `GovernanceLedger` | 그대로 이동 |
 | `ReconcileExpiredClaims` | `ProcessingLedger` service | production timer에서 호출 |
-| `NextRef` | `RefAllocator` | Store에서 제거 |
-| `Snapshot` | `ProjectionReader` | write store에서 제거 |
+| `NextRef` | `RefAllocator` | Service는 RefAllocator만 사용, Store는 dev/test composite marker |
+| `Snapshot` | `ProjectionReader` | Service는 ProjectionReader만 사용, Store는 dev/test composite marker |
 
 ## Migration Order
 
@@ -330,9 +350,16 @@ domain aggregate별 port를 만든다.
 
 변경 기준:
 
-- endpoint/message/processing/artifact/governance/side-effect method가 각 port로 이동한다.
+- endpoint/message/processing/readback/artifact/governance method가 각 port로 이동한다.
 - `Service` constructor는 작은 ports를 받되, dev/test adapter는 composite struct로 한 번에 제공할 수 있다.
 - 기존 memory/SQLite integration tests는 같은 behavior로 통과해야 한다.
+
+현재 구현 상태:
+
+- `Service`는 `Store` field를 갖지 않는다.
+- `NewServerWithPorts`는 `Store`를 받지 않고 개별 port를 받는다.
+- `Store`는 memory/SQLite dev/test adapter를 위한 composite marker다.
+- `tests/server_adapter_contract_test.go`가 memory/SQLite를 같은 conformance flow로 검증한다.
 
 ### Step 4. DeliveryAdapter 도입
 
@@ -378,11 +405,16 @@ Store port split PR은 아래를 만족해야 한다.
 
 1. `go test ./...`가 external service 없이 통과한다.
 2. memory adapter와 SQLite adapter가 같은 conformance test를 통과한다.
-3. `NextRef`는 `Store` interface에서 빠지고 `RefAllocator`로 이동한다.
-4. `Snapshot`은 write store에서 빠지고 `ProjectionReader`로 이동한다.
-5. `ClaimNextMessage`는 adapter fetch와 domain claim의 분리 지점을 가진다.
+3. `Service`는 `Store` field 없이 개별 ports만 사용한다.
+4. `NewServerWithPorts`는 `Store`가 아니라 개별 ports를 받는다.
+5. `Store`는 memory/SQLite dev/test composite marker로만 남는다.
 6. public refs는 adapter-native id와 분리된다.
 7. docs validator가 통과한다.
+
+W1 종료 시점의 남은 explicit handoff:
+
+- `ClaimNextMessage`는 다음 단계에서 `DeliveryAdapter` fetch와 `ProcessingLedger` domain claim으로 분리한다.
+- JetStream stream sequence, consumer sequence, ack metadata는 public `tc://...` refs를 대체하지 않는다.
 
 ## Sources
 

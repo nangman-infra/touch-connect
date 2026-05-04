@@ -3,7 +3,7 @@
 > Scope: 메시지 중심 협업 플랫폼 설계 원칙과 handoff 기준
 > Canonical Path: `docs/active/foundation/message-centered-platform-principles.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-04
 
 # Message-Centered Platform Principles
 
@@ -177,7 +177,7 @@ risk_level
 confidence
 next_action
 delivery_class
-readback_required
+phraseology_policy
 requires_approval
 approval_scope
 idempotency_key
@@ -187,7 +187,8 @@ timestamp
 ```
 
 구현 기준 canonical envelope는 [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)의 계약을 따른다.
-이 목록의 `from_role`과 `to_role`은 역할 이해를 돕는 projection label이며, domain routing key는 `target_capability`다.
+이 목록의 `from_role`과 `to_role`은 역할 이해를 돕는 projection label이며, domain routing key는 `CapabilityClaim`이다.
+`readback_required`와 `target_capability`는 현재 구현 호환 projection으로만 유지한다.
 
 ### 필드 해석 원칙
 
@@ -195,7 +196,7 @@ timestamp
 - `state`는 자유 텍스트 감상이 아니라 task의 현재 상태를 설명하는 운영 필드다.
 - `artifact_refs`는 대화 복사본보다 우선한다.
 - `delivery_class`는 단순 알림인지, 작업 요청인지, 승인 요청인지 구분한다.
-- `readback_required`는 오해 비용이 큰 handoff에만 사용한다.
+- `phraseology_policy`는 오해 비용이 큰 handoff에서 readback과 missing-constraint 검증을 정의한다.
 - `idempotency_key`는 외부 side effect가 걸린 작업에 붙인다.
 - `supersedes_message_id`는 이전 지시를 무효화하거나 덮어쓸 때 사용한다.
 
@@ -207,8 +208,8 @@ timestamp
 2. critical information은 반드시 task history 또는 artifact history에 남긴다.
 3. 메시지 재전송은 허용하지만, 외부 side effect는 idempotent해야 한다.
 4. critical handoff는 `ack` 또는 `readback` 가능한 문법을 가져야 한다.
-5. 내부 메시지 레이어는 `replay`, `retention`, `correlation`, `backpressure`, `dedupe`를 지원할 수 있어야 한다.
-6. MQTT는 참고할 전송 철학이고, A2A는 상호운용과 task/state 경계이며, MCP는 외부 도구 연동의 edge layer다.
+5. transport/replay/retention/dedupe는 production adapter 뒤에 둔다.
+6. JetStream과 Temporal은 infra adapter 후보이고, A2A는 상호운용과 task/state 경계이며, MCP는 외부 도구 연동의 edge layer다.
 
 ## 역할 기반 협업 원칙
 

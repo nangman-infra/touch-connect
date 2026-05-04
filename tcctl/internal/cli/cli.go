@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -27,6 +28,8 @@ type Runtime struct {
 	stderr io.Writer
 }
 
+var errHelpRequested = errors.New("help requested")
+
 func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -40,6 +43,10 @@ func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	global.BoolVar(&cfg.JSON, "json", false, "write JSON output")
 	showVersion := global.Bool("version", false, "show tcctl version")
 	if err := global.Parse(args); err != nil {
+		if flagHelpRequested(err) {
+			writeRootHelp(stdout)
+			return nil
+		}
 		return usageError(err)
 	}
 	cfg, err = cfg.Validated()
@@ -61,10 +68,17 @@ func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		stdout: stdout,
 		stderr: stderr,
 	}
-	if err := runtime.ensureCompatible(ctx, remaining); err != nil {
+	if !isHelpRequest(remaining) {
+		if err := runtime.ensureCompatible(ctx, remaining); err != nil {
+			return err
+		}
+	}
+	if err := runtime.dispatch(ctx, remaining); helpWasShown(err) {
+		return nil
+	} else if err != nil {
 		return err
 	}
-	return runtime.dispatch(ctx, remaining)
+	return nil
 }
 
 func (r Runtime) ensureCompatible(ctx context.Context, args []string) error {
@@ -83,6 +97,8 @@ func (r Runtime) ensureCompatible(ctx context.Context, args []string) error {
 
 func (r Runtime) dispatch(ctx context.Context, args []string) error {
 	switch args[0] {
+	case "help":
+		return r.help(args[1:])
 	case "server":
 		return r.server(ctx, args[1:])
 	case "endpoint":
@@ -99,7 +115,7 @@ func (r Runtime) dispatch(ctx context.Context, args []string) error {
 		return r.dlq(ctx, args[1:])
 	case "scenario":
 		return r.scenario(ctx, args[1:])
-	case "help", "-h", "--help":
+	case "-h", "--help":
 		writeRootHelp(r.stdout)
 		return nil
 	default:
@@ -110,7 +126,25 @@ func (r Runtime) dispatch(ctx context.Context, args []string) error {
 func commandFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "usage: tcctl %s\n", name)
+		if hasVisibleFlags(flags) {
+			fmt.Fprintln(flags.Output(), "")
+			fmt.Fprintln(flags.Output(), "flags:")
+			flags.PrintDefaults()
+		}
+	}
 	return flags
+}
+
+func parseCommandFlags(flags *flag.FlagSet, args []string) error {
+	if err := flags.Parse(args); err != nil {
+		if flagHelpRequested(err) {
+			return errHelpRequested
+		}
+		return usageError(err)
+	}
+	return nil
 }
 
 func requireArgs(args []string, count int, usage string) error {
@@ -128,6 +162,10 @@ func unavailableError(err error) error {
 	return ExitError{Code: 3, Err: err}
 }
 
+func commandError(err error) error {
+	return ExitError{Code: 1, Err: err}
+}
+
 func writeRootHelp(w io.Writer) {
 	fmt.Fprintln(w, "usage: tcctl [--control-url URL] [--timeout DURATION] [--json] <group> <command>")
 	fmt.Fprintln(w, "")
@@ -140,8 +178,72 @@ func writeRootHelp(w io.Writer) {
 	fmt.Fprintln(w, "  approval    list and inspect approval records")
 	fmt.Fprintln(w, "  dlq         list and inspect dead-letter records")
 	fmt.Fprintln(w, "  scenario    run and verify canonical scenario records")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "use \"tcctl help <group>\" or \"tcctl <group> <command> -h\" for command help")
 }
 
 func parseTimeout(value string) (time.Duration, error) {
 	return time.ParseDuration(value)
+}
+
+func (r Runtime) help(args []string) error {
+	if len(args) == 0 {
+		writeRootHelp(r.stdout)
+		return nil
+	}
+	switch args[0] {
+	case "server":
+		return r.server(context.Background(), append([]string{"help"}, args[1:]...))
+	case "endpoint":
+		return r.endpoint(context.Background(), append([]string{"help"}, args[1:]...))
+	case "message":
+		return r.message(context.Background(), append([]string{"help"}, args[1:]...))
+	case "task":
+		return r.task(context.Background(), append([]string{"help"}, args[1:]...))
+	case "artifact":
+		return r.artifact(context.Background(), append([]string{"help"}, args[1:]...))
+	case "approval":
+		return r.approval(context.Background(), append([]string{"help"}, args[1:]...))
+	case "dlq":
+		return r.dlq(context.Background(), append([]string{"help"}, args[1:]...))
+	case "scenario":
+		return r.scenario(context.Background(), append([]string{"help"}, args[1:]...))
+	default:
+		return usageError(fmt.Errorf("unknown help topic %q", args[0]))
+	}
+}
+
+func isHelpRequest(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		return true
+	}
+	for _, arg := range args[1:] {
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+func helpOnly(args []string) bool {
+	return len(args) == 0 || args[0] == "-h" || args[0] == "--help"
+}
+
+func flagHelpRequested(err error) bool {
+	return errors.Is(err, flag.ErrHelp)
+}
+
+func helpWasShown(err error) bool {
+	return errors.Is(err, errHelpRequested)
+}
+
+func hasVisibleFlags(flags *flag.FlagSet) bool {
+	hasFlags := false
+	flags.VisitAll(func(*flag.Flag) {
+		hasFlags = true
+	})
+	return hasFlags
 }

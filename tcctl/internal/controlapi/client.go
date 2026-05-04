@@ -37,6 +37,12 @@ func (c *Client) Version(ctx context.Context) (contracts.VersionResponse, error)
 	return out, err
 }
 
+func (c *Client) Snapshot(ctx context.Context) (contracts.SnapshotResponse, error) {
+	var out contracts.SnapshotResponse
+	err := c.get(ctx, "/v1/snapshot", &out)
+	return out, err
+}
+
 func (c *Client) Endpoints(ctx context.Context) ([]contracts.EndpointRecord, error) {
 	var out []contracts.EndpointRecord
 	err := c.get(ctx, "/v1/endpoints", &out)

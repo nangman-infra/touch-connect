@@ -179,8 +179,6 @@ func (s *Service) ClaimNextMessage(req contracts.ClaimNextMessageRequest) (contr
 	s.store.ReconcileExpiredClaims(now)
 	result, found, err := s.store.ClaimNextMessage(domain.ClaimNextRequest{
 		Endpoint:       endpoint,
-		AttemptRef:     s.store.NextRef("attempt"),
-		DeadLetterRef:  s.store.NextRef("dead-letter"),
 		LeaseExpiresAt: now.Add(s.settings.AttemptLeaseDuration),
 		Now:            now,
 		MaxRedelivery:  s.settings.MaxRedelivery,

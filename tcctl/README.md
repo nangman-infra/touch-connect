@@ -49,7 +49,7 @@ tcctl dlq list
 tcctl dlq inspect <dead_letter_ref>
 tcctl dlq replay <dead_letter_ref>
 
-tcctl scenario run canonical [--task <task_ref>]
+tcctl scenario run canonical [--task <task_ref>] [--wait=true] [--wait-timeout 10s]
 tcctl scenario verify canonical [--task <task_ref>]
 ```
 
@@ -62,13 +62,21 @@ tcctl scenario verify canonical [--task <task_ref>]
 --json
 ```
 
-`tcctl` checks the `tc-control` reported contract version before executing commands, except local `--version` and `server version` inspection.
+`tcctl` checks the `tc-control` reported contract version before executing commands, except local `--version`, local help output, and `server version` inspection.
+
+Use command help without a running control plane:
+
+```text
+tcctl help message
+tcctl message send -h
+tcctl task create -h
+```
 
 ## Current Gaps
 
 - Auth material is not yet enforced as middleware.
 - Mutation audit is not yet persisted by `tc-control`.
-- `scenario verify canonical` reports missing evidence as `passed=false`; it does not fake scenario success.
+- `scenario verify canonical` reports missing evidence as `passed=false`; `scenario run canonical` waits for real worker evidence instead of writing worker checkpoints locally.
 
 Detailed implementation docs:
 

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
 	tccontrol "github.com/nangman-infra/touch-connect/tc-control"
@@ -132,6 +133,26 @@ func TestTCCTLRejectsIncompatibleContractVersion(t *testing.T) {
 	exitErr, ok := err.(tcctl.ExitError)
 	if !ok || exitErr.Code != 2 {
 		t.Fatalf("expected usage exit code for incompatible contract, got %#v", err)
+	}
+}
+
+func TestTCCTLCommandHelpDoesNotRequireControl(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := tcctl.Run(context.Background(), []string{"message", "send", "-h"}, &stdout, &stderr); err != nil {
+		t.Fatalf("tcctl message send help failed: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "usage: tcctl message send") || !strings.Contains(stderr.String(), "-capability") {
+		t.Fatalf("expected message send help in stderr, stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := tcctl.Run(context.Background(), []string{"help", "task", "create"}, &stdout, &stderr); err != nil {
+		t.Fatalf("tcctl help task create failed: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "usage: tcctl task create") || !strings.Contains(stderr.String(), "-summary") {
+		t.Fatalf("expected task create help in stderr, stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -371,6 +392,21 @@ func TestTCCTLCanonicalScenarioRunAndVerify(t *testing.T) {
 	if err := worker.Register(context.Background()); err != nil {
 		t.Fatalf("register worker: %v", err)
 	}
+	workerDone := make(chan error, 1)
+	go func() {
+		for {
+			result, err := worker.ProcessNext(context.Background())
+			if err != nil {
+				workerDone <- err
+				return
+			}
+			if !result.Empty {
+				workerDone <- nil
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
 	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
 	if err != nil {
 		t.Fatalf("create control: %v", err)
@@ -385,16 +421,28 @@ func TestTCCTLCanonicalScenarioRunAndVerify(t *testing.T) {
 		"--json",
 		"scenario", "run", "canonical",
 		"--task", "task.scenario.1",
+		"--wait-timeout", "2s",
+		"--poll-interval", "10ms",
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("tcctl scenario run failed: %v stderr=%s", err, stderr.String())
 	}
-	var sent contracts.MessageIngressResponse
-	if err := json.Unmarshal(stdout.Bytes(), &sent); err != nil {
+	var runReport struct {
+		Message contracts.MessageIngressResponse `json:"message"`
+		Passed  bool                             `json:"passed"`
+		Checks  []struct {
+			Name   string `json:"name"`
+			Passed bool   `json:"passed"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &runReport); err != nil {
 		t.Fatalf("decode scenario run output: %v\n%s", err, stdout.String())
 	}
-	if sent.MessageRef == "" {
-		t.Fatalf("expected scenario run to create message, got %+v", sent)
+	if runReport.Message.MessageRef == "" || !runReport.Passed {
+		t.Fatalf("expected scenario run to pass with message, got %+v", runReport)
+	}
+	if err := <-workerDone; err != nil {
+		t.Fatalf("worker process next failed: %v", err)
 	}
 
 	stdout.Reset()
@@ -418,8 +466,28 @@ func TestTCCTLCanonicalScenarioRunAndVerify(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("decode scenario verify output: %v\n%s", err, stdout.String())
 	}
-	if report.Passed || len(report.Checks) != 5 || !report.Checks[0].Passed {
-		t.Fatalf("expected partial canonical verification failure with readback handoff present, got %+v", report)
+	if !report.Passed || len(report.Checks) != 5 {
+		t.Fatalf("expected complete canonical verification success, got %+v", report)
+	}
+	for _, check := range report.Checks {
+		if !check.Passed {
+			t.Fatalf("expected all canonical checks to pass, got %+v", report)
+		}
+	}
+}
+
+func TestInMemoryRefsUsePerKindSequences(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	message := ingressMessage(t, serverHTTP.URL, serverHTTP.Client(), false)
+	claim := claimMessage(t, serverHTTP.URL, serverHTTP.Client(), message.MessageRef, tcworker.DefaultConfig().EndpointRef, http.StatusAccepted)
+	if !strings.HasSuffix(message.MessageRef, "msg_000001") || !strings.HasSuffix(message.DeliveryRef, "dlv_000001") || !strings.HasSuffix(claim.AttemptRef, "att_000001") {
+		t.Fatalf("expected per-kind ref sequences, message=%+v claim=%+v", message, claim)
 	}
 }
 

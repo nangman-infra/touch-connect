@@ -38,11 +38,19 @@ func (s *Store) nextEligibleMessage(state string, endpoint domain.Endpoint) (dom
 }
 
 func (s *Store) claimNextEligibleMessage(message domain.Message, claim domain.ClaimNextRequest) (domain.ClaimResult, bool, error) {
+	attemptRef := claim.AttemptRef
+	if attemptRef == "" {
+		attemptRef = s.nextRefLocked("attempt")
+	}
+	deadLetterRef := claim.DeadLetterRef
+	if deadLetterRef == "" {
+		deadLetterRef = s.nextRefLocked("dead-letter")
+	}
 	request := domain.ClaimRequest{
 		MessageRef:     message.MessageRef,
 		Endpoint:       claim.Endpoint,
-		AttemptRef:     claim.AttemptRef,
-		DeadLetterRef:  claim.DeadLetterRef,
+		AttemptRef:     attemptRef,
+		DeadLetterRef:  deadLetterRef,
 		LeaseExpiresAt: claim.LeaseExpiresAt,
 		Now:            claim.Now,
 		MaxRedelivery:  claim.MaxRedelivery,

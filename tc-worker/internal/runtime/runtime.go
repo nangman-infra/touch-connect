@@ -165,6 +165,9 @@ func (r *Runtime) finishClaimAfterAck(ctx context.Context, claim contracts.Claim
 	case ExecutionOutcomeFailed:
 		return claim.AttemptRef, ExecutionOutcomeFailed, r.failClaim(ctx, claim, accepted)
 	default:
+		if isCanonicalScenario(claim) {
+			return claim.AttemptRef, ExecutionOutcomeCompleted, r.completeCanonicalClaim(ctx, claim, accepted)
+		}
 		return claim.AttemptRef, ExecutionOutcomeCompleted, r.completeClaim(ctx, claim, accepted)
 	}
 }
@@ -235,6 +238,10 @@ func (r *Runtime) RefreshLease(ctx context.Context, attemptRef string) error {
 func (r *Runtime) RegisterArtifactVersion(ctx context.Context, attemptRef string, req contracts.ArtifactVersionRequest) (contracts.ArtifactVersionResponse, error) {
 	req.EndpointRef = r.config.EndpointRef
 	return r.client.RegisterArtifactVersion(ctx, attemptRef, req)
+}
+
+func (r *Runtime) RecordApprovalDecision(ctx context.Context, attemptRef string, req contracts.ApprovalDecisionRequest) (contracts.ApprovalDecisionResponse, error) {
+	return r.client.RecordApprovalDecision(ctx, attemptRef, req)
 }
 
 func (r *Runtime) StartSideEffectExecution(ctx context.Context, attemptRef string, req contracts.SideEffectExecutionRequest) (contracts.SideEffectExecutionResponse, error) {

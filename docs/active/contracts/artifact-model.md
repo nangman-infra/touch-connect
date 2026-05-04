@@ -3,7 +3,7 @@
 > Scope: artifact identity, versioning, retention, access, lineage 계약
 > Canonical Path: `docs/active/contracts/artifact-model.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-05-03
+> Last Reviewed: 2026-05-04
 
 # Artifact Model
 
@@ -19,6 +19,22 @@
 - storage backend와 분리된 참조 방식을 가진다.
 
 ## 핵심 개념
+
+### ArtifactLineage
+
+`ArtifactLineage`는 기존 artifact version list의 상위 제품 surface다.
+
+최소 edge:
+
+- `parent_version`
+- `derived_from`
+- `supersedes`
+
+규칙:
+
+- 기존 artifact를 수정, 파생, 대체하는 message는 exact artifact version ref와 lineage edge를 남겨야 한다.
+- lineage edge가 없는 artifact 변경 handoff는 message quality violation이다.
+- latest pointer는 UI convenience일 뿐 lineage source of truth가 아니다.
 
 ### Artifact
 
@@ -217,4 +233,4 @@ artifact lineage는 optional convenience가 아니라 core contract다.
 ## Sources
 
 - A2A Protocol specification
-  - https://a2a-protocol.org/dev/specification/
+  - https://a2a-protocol.org/latest/specification/

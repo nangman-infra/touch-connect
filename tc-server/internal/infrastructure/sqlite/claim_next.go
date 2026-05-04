@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"database/sql"
 	"errors"
 
 	"github.com/nangman-infra/touch-connect/tc-server/internal/domain"
@@ -36,7 +37,11 @@ ORDER BY CASE state WHEN ? THEN 0 ELSE 1 END, message_ref`,
 		}
 		return domain.ClaimResult{}, false, nil
 	}
-	result, err := s.claimMessageTx(tx, message, claimRequestFromNext(message, claim))
+	request, err := claimRequestFromNextTx(tx, message, claim)
+	if err != nil {
+		return domain.ClaimResult{}, false, err
+	}
+	result, err := s.claimMessageTx(tx, message, request)
 	if err != nil {
 		if errors.Is(err, domain.ErrMessageDeadLettered) {
 			if err := tx.Commit(); err != nil {
@@ -61,14 +66,30 @@ func nextEligibleMessage(messages []domain.Message, endpoint domain.Endpoint) (d
 	return domain.Message{}, false
 }
 
-func claimRequestFromNext(message domain.Message, claim domain.ClaimNextRequest) domain.ClaimRequest {
+func claimRequestFromNextTx(tx *sql.Tx, message domain.Message, claim domain.ClaimNextRequest) (domain.ClaimRequest, error) {
+	attemptRef := claim.AttemptRef
+	if attemptRef == "" {
+		var err error
+		attemptRef, err = nextRefTx(tx, "attempt")
+		if err != nil {
+			return domain.ClaimRequest{}, err
+		}
+	}
+	deadLetterRef := claim.DeadLetterRef
+	if deadLetterRef == "" {
+		var err error
+		deadLetterRef, err = nextRefTx(tx, "dead-letter")
+		if err != nil {
+			return domain.ClaimRequest{}, err
+		}
+	}
 	return domain.ClaimRequest{
 		MessageRef:     message.MessageRef,
 		Endpoint:       claim.Endpoint,
-		AttemptRef:     claim.AttemptRef,
-		DeadLetterRef:  claim.DeadLetterRef,
+		AttemptRef:     attemptRef,
+		DeadLetterRef:  deadLetterRef,
 		LeaseExpiresAt: claim.LeaseExpiresAt,
 		Now:            claim.Now,
 		MaxRedelivery:  claim.MaxRedelivery,
-	}
+	}, nil
 }

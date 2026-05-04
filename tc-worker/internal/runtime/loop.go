@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
@@ -15,13 +16,15 @@ type LoopOptions struct {
 }
 
 type ProcessResult struct {
-	Empty      bool
-	MessageRef string
-	AttemptRef string
-	Outcome    string
-	Completed  bool
-	Blocked    bool
-	Failed     bool
+	Empty          bool
+	MessageRef     string
+	AttemptRef     string
+	TaskRef        string
+	CorrelationRef string
+	Outcome        string
+	Completed      bool
+	Blocked        bool
+	Failed         bool
 }
 
 func DefaultLoopOptions() LoopOptions {
@@ -72,12 +75,14 @@ func (r *Runtime) ProcessNext(ctx context.Context) (ProcessResult, error) {
 		return ProcessResult{}, err
 	}
 	return ProcessResult{
-		MessageRef: claim.MessageRef,
-		AttemptRef: attemptRef,
-		Outcome:    outcome,
-		Completed:  outcome == ExecutionOutcomeCompleted,
-		Blocked:    outcome == ExecutionOutcomeMissingFields,
-		Failed:     outcome == ExecutionOutcomeFailed,
+		MessageRef:     claim.MessageRef,
+		AttemptRef:     attemptRef,
+		TaskRef:        taskRefForClaim(claim),
+		CorrelationRef: claim.CorrelationRef,
+		Outcome:        outcome,
+		Completed:      outcome == ExecutionOutcomeCompleted,
+		Blocked:        outcome == ExecutionOutcomeMissingFields,
+		Failed:         outcome == ExecutionOutcomeFailed,
 	}, nil
 }
 
@@ -101,6 +106,16 @@ func (r *Runtime) runProcessingLoop(ctx context.Context, options LoopOptions, he
 		}
 		if !result.Empty {
 			processed++
+			log.Printf("worker processed message_ref=%s attempt_ref=%s task_ref=%s correlation_ref=%s outcome=%s completed=%t blocked=%t failed=%t",
+				result.MessageRef,
+				result.AttemptRef,
+				result.TaskRef,
+				result.CorrelationRef,
+				result.Outcome,
+				result.Completed,
+				result.Blocked,
+				result.Failed,
+			)
 			if options.MaxMessages > 0 && processed >= options.MaxMessages {
 				return nil
 			}

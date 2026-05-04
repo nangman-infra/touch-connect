@@ -258,7 +258,7 @@ created_at
 ## Sources
 
 - A2A Protocol specification
-  - https://a2a-protocol.org/dev/specification/
+  - https://a2a-protocol.org/latest/specification/
 - A2A Core Concepts
   - https://a2a-protocol.org/latest/topics/key-concepts/
 - A2A Streaming and Asynchronous Operations

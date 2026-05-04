@@ -3,7 +3,7 @@
 > Scope: ordering, ack, readback, redelivery, dedupe, expiry, supersede, protected side effect 실행 계약
 > Canonical Path: `docs/active/contracts/delivery-semantics.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-05-03
+> Last Reviewed: 2026-05-04
 
 # Delivery Semantics
 
@@ -257,10 +257,11 @@ status는 아래를 기본으로 둔다.
 
 이 문서는 아래 구현체 모두에 적용된다.
 
-- MQTT
-- NATS / JetStream
+- NATS JetStream
+- Temporal
 - A2A streaming or polling
-- 내부 custom bus
+- AGNTCY-compatible adapter
+- memory/SQLite dev/test adapter
 
 브로커가 바뀌어도 아래 계약은 바뀌면 안 된다.
 
@@ -272,13 +273,35 @@ status는 아래를 기본으로 둔다.
 - protected side effect execution ledger
 - expiry와 supersede rule
 
+## Production adapter 매핑
+
+production 경로는 자체 queue 기능이 아니라 외부 adapter 위에서 동작한다.
+
+| Semantics | JetStream adapter | Temporal adapter | A2A adapter | AGNTCY-compatible adapter |
+| --- | --- | --- | --- | --- |
+| Publish dedupe | `Nats-Msg-Id`와 duplicate window | workflow id 또는 activity idempotency key | A2A task/message id mapping | target protocol idempotency field |
+| Work distribution | work-queue retention + pull consumer | workflow/activity task queue | inbound task/message dispatch | remote agent invocation queue |
+| Ack | explicit consumer ack | activity/workflow step completion event | task status/message accepted mapping | protocol-specific accepted state |
+| Redelivery | ack wait + max deliver | retry policy + durable event history | polling/stream resume + task state query | protocol-specific retry/timeout |
+| Replay | stream replay or projection rebuild | workflow history replay | task history/artifact read | maintained protocol history if available |
+| Business exactly-once | side effect execution ledger | side effect execution ledger | side effect execution ledger | side effect execution ledger |
+
+규칙:
+
+- JetStream ack는 business completion이 아니다.
+- Temporal workflow completion은 protected side effect 승인 자체가 아니다.
+- A2A task history는 current state 복구에 도움을 주지만, `touch-connect`의 ApprovalChain과 ArtifactLineage를 대체하지 않는다.
+- AGNTCY ACP는 `agntcy/acp-spec` repository가 2026-04-11에 archived 되었으므로, production adapter 기준으로 쓰기 전에 현재 maintained source of truth를 재확인해야 한다.
+- memory/SQLite adapter는 local dev/test와 deterministic integration test 용도이며 production default가 아니다.
+
 ## 현재 구현 기본값
 
 - conversational order는 `thread_sequence`만 믿는다.
 - task projection order는 `task_revision`만 믿는다.
 - protected side effect는 `idempotency_key`와 side effect execution record 없이 실행하지 않는다.
 - protected side effect 실행 여부는 execution ledger로만 판단한다.
-- `approval_request`와 `state_update`는 항상 durable path로 보낸다.
+- `approval_request`와 `state_update`는 항상 durable adapter path로 보낸다.
+- local memory/SQLite path는 explicit dev/test profile에서만 사용한다.
 
 ## Related Docs
 
@@ -293,6 +316,12 @@ status는 아래를 기본으로 둔다.
 - MQTT 5.0
   - https://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.pdf
 - A2A Protocol specification
-  - https://a2a-protocol.org/dev/specification/
+  - https://a2a-protocol.org/latest/specification/
 - NATS JetStream
   - https://docs.nats.io/nats-concepts/jetstream
+- NATS JetStream Streams
+  - https://docs.nats.io/nats-concepts/jetstream/streams
+- Temporal Series D / Durable Execution
+  - https://temporal.io/news/temporal-raises-300M-to-make-agentic-ai-real-for-companies
+- AGNTCY ACP archived repository
+  - https://github.com/agntcy/acp-spec

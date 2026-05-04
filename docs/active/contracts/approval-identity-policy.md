@@ -3,7 +3,7 @@
 > Scope: identity subject, capability policy, approval request와 re-approval 계약
 > Canonical Path: `docs/active/contracts/approval-identity-policy.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-04
 
 # Approval Identity Policy
 
@@ -16,6 +16,18 @@
 - identity는 `누가 행동했는가`
 - policy는 `무엇을 할 수 있는가`
 - approval은 `추가 승인이 필요한가`
+
+`ApprovalChain`은 기존 approval record의 상위 제품 surface다.
+
+ApprovalChain은 아래를 한 줄기로 묶는다.
+
+- approval request
+- approval decision
+- approval scope
+- expiry
+- re-binding
+- scope narrowing/widening
+- protected side effect execution evidence
 
 ## Identity subject
 
@@ -150,6 +162,8 @@ material change가 발생하면 기존 approval은 무효다.
 
 - `approval_hash`가 바뀌면 기존 approval은 재사용하지 않는다.
 - 승인 후 내용이 바뀌면 새 approval request를 만든다.
+- scope가 좁아지는 변경은 ApprovalChain에 자동 re-binding할 수 있다.
+- scope가 넓어지는 변경은 재승인을 요구한다.
 
 ## Protected side effect 승인 경계
 

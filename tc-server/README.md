@@ -27,3 +27,13 @@ Detailed implementation docs:
 - [docs/implementation-contract.md](docs/implementation-contract.md)
 - [docs/definition-of-done.md](docs/definition-of-done.md)
 - [docs/implementation-task-list.md](docs/implementation-task-list.md)
+
+## Local Run
+
+```text
+tc-server -h
+tc-server -bind 127.0.0.1:8080 -storage memory
+tc-server -storage sqlite -sqlite-path /absolute/path/to/touch-connect.sqlite
+```
+
+The same settings are available through `TC_SERVER_BIND_ADDR`, `TC_SERVER_STORAGE`, and `TC_SERVER_SQLITE_PATH`.

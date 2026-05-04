@@ -12,7 +12,7 @@ import (
 
 type Store struct {
 	mu            sync.Mutex
-	sequence      int
+	sequences     map[string]int
 	endpoints     map[string]domain.Endpoint
 	messages      map[string]domain.Message
 	attempts      map[string]domain.Attempt
@@ -27,6 +27,7 @@ type Store struct {
 
 func NewStore() *Store {
 	return &Store{
+		sequences:     map[string]int{},
 		endpoints:     map[string]domain.Endpoint{},
 		messages:      map[string]domain.Message{},
 		attempts:      map[string]domain.Attempt{},
@@ -353,8 +354,12 @@ func (s *Store) ReconcileExpiredClaims(now time.Time) int {
 func (s *Store) NextRef(kind string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sequence++
-	return fmt.Sprintf("tc://%s/%s_%06d", kind, kindPrefix(kind), s.sequence)
+	return s.nextRefLocked(kind)
+}
+
+func (s *Store) nextRefLocked(kind string) string {
+	s.sequences[kind]++
+	return fmt.Sprintf("tc://%s/%s_%06d", kind, kindPrefix(kind), s.sequences[kind])
 }
 
 func (s *Store) Snapshot() domain.Snapshot {

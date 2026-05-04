@@ -3,7 +3,7 @@
 > Scope: message, room, thread, task, correlation의 관계와 task state machine
 > Canonical Path: `docs/active/contracts/message-task-state-model.md`
 > Source Of Truth: yes
-> Last Reviewed: 2026-04-30
+> Last Reviewed: 2026-05-04
 
 # Message Task State Model
 
@@ -121,11 +121,11 @@ room_id
 thread_id
 thread_sequence
 sender_endpoint_ref
-target_capability
+capability_claim
 task_id (optional)
 correlation_id (optional)
 delivery_class
-readback_required
+phraseology_policy_ref or phraseology_policy
 payload.summary
 payload.body
 payload.references[]
@@ -138,9 +138,11 @@ created_at
 
 규칙:
 
-- `target_capability`는 routing의 1차 기준이며 endpoint 내부 skill을 노출하지 않는다.
+- `capability_claim`은 routing의 1차 기준이며 endpoint 내부 skill을 노출하지 않는다.
+- `target_capability`는 현재 구현 호환을 위한 단일 capability projection이다.
 - `payload.references[]`는 message가 참조하는 입력 ref이고, `artifact_version_refs[]`는 artifact ledger의 exact version ref다.
-- `delivery_class`와 `readback_required`는 delivery contract와 같은 값을 사용한다.
+- `delivery_class`와 `phraseology_policy`는 delivery contract와 message quality policy를 따른다.
+- `readback_required`는 현재 구현 호환을 위한 boolean projection이다.
 - `idempotency_key`는 보호된 외부 side effect intent가 있을 때만 필수다.
 - `from_role`이나 `to_role`은 UI/projection label일 수 있지만 domain routing key가 아니다.
 
@@ -245,4 +247,4 @@ reason은 free text가 아니라 enum으로 관리하는 것을 기본값으로 
 ## Sources
 
 - A2A Protocol specification
-  - https://a2a-protocol.org/dev/specification/
+  - https://a2a-protocol.org/latest/specification/

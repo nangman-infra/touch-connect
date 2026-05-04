@@ -44,13 +44,17 @@
 
 - [go-ddd-sonarqube-baseline.md](docs/active/engineering/go-ddd-sonarqube-baseline.md)
   - Go 구현 원칙, DDD 경계, SonarQube 품질 게이트 기준
+- [transport-adapters.md](docs/active/engineering/transport-adapters.md)
+  - JetStream, Temporal, A2A, AGNTCY adapter 작성 규약과 Store interface 정제 기준
 
 ### Contracts
 
 - [ai-communication-layer-contract.md](docs/active/contracts/ai-communication-layer-contract.md)
-  - TCP/IP-like AI message layer의 통합 구현 계약
+  - message-quality and handoff-governance layer의 통합 구현 계약
 - [message-task-state-model.md](docs/active/contracts/message-task-state-model.md)
   - room/thread/task/message/correlation 관계와 task state machine
+- [message-quality-policy.md](docs/active/contracts/message-quality-policy.md)
+  - PhraseologyPolicy, CapabilityClaim, readback, missing-constraint 검증 계약
 - [artifact-model.md](docs/active/contracts/artifact-model.md)
   - artifact identity, versioning, retention, lineage
 - [approval-identity-policy.md](docs/active/contracts/approval-identity-policy.md)
@@ -80,11 +84,13 @@
 4. Foundation의 `principles`
 5. Foundation의 `market-and-research`
 6. Engineering의 `go-ddd-sonarqube-baseline`
-7. Contracts의 `ai-communication-layer-contract`
-8. Contracts의 `message-task-state-model`
-9. Contracts의 `artifact-model`
-10. Contracts의 `approval-identity-policy`
-11. Contracts의 `delivery-semantics`
-12. Contracts의 `checkpoint-and-takeover-model`
-13. Product의 `mvp-canonical-scenario`
-14. Governance의 `document-lifecycle`
+7. Engineering의 `transport-adapters`
+8. Contracts의 `ai-communication-layer-contract`
+9. Contracts의 `message-quality-policy`
+10. Contracts의 `message-task-state-model`
+11. Contracts의 `artifact-model`
+12. Contracts의 `approval-identity-policy`
+13. Contracts의 `delivery-semantics`
+14. Contracts의 `checkpoint-and-takeover-model`
+15. Product의 `mvp-canonical-scenario`
+16. Governance의 `document-lifecycle`

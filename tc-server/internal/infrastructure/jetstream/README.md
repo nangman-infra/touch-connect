@@ -65,14 +65,17 @@ Implemented:
 - `NewAdapter`
 - stream creation with `WorkQueuePolicy`
 - `PublishAcceptedMessage`
+- durable pull consumer creation with `AckExplicit`, `AckWait`, and `MaxDeliver`
+- `FetchNextDelivery`
+- `AckDelivery`
+- `NakDelivery`
 - publish dedupe through `Nats-Msg-Id`
-- adapter metadata receipt for stream, sequence, subject, and duplicate status
+- adapter metadata receipt for stream, consumer, sequence, subject, duplicate status, and redelivery count
 
 Not connected yet:
 
-- pull consumer fetch
-- ack/nak delivery state
 - service runtime dispatch path
+- durable domain claim handoff from `ClaimNextMessage` to `DeliveryAdapter` plus `ProcessingLedger`
 
 Current W2 bootstrap command:
 
@@ -85,14 +88,19 @@ The bootstrap integration test only proves that local dev NATS has JetStream
 enabled. It intentionally does not claim that the production adapter is
 implemented.
 
-The adapter publish integration test is:
+The adapter lifecycle integration test is:
 
 ```bash
 NATS_URL=nats://127.0.0.1:4222 go test -tags=integration,jetstream ./tc-server/internal/infrastructure/jetstream
 ```
 
-It verifies stream creation, message publish, duplicate publish detection, and
-stored metadata headers.
+It verifies stream creation, message publish, duplicate publish detection,
+stored metadata headers, pull consumer fetch, ack removal, and nak redelivery.
+
+The fetched JetStream message is tracked in process by `delivery_ref` until
+`AckDelivery` or `NakDelivery` is called. That pending map only binds broker
+ack state to the public delivery ref; it is not task history, attempt state, or
+lineage storage.
 
 ## Sources
 

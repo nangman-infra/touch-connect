@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nangman-infra/touch-connect/tc-server/internal/application"
 	"github.com/nangman-infra/touch-connect/tc-server/internal/domain"
 	"github.com/nats-io/nats.go"
 )
@@ -85,4 +86,132 @@ func TestAdapterPublishesAcceptedMessageWithDedupe(t *testing.T) {
 	if raw.Header.Get(HeaderCorrelationRef) != message.CorrelationRef || raw.Header.Get(HeaderCapability) != message.TargetCapability {
 		t.Fatalf("expected correlation and capability headers, got %+v", raw.Header)
 	}
+}
+
+func TestAdapterFetchesAndAcksDelivery(t *testing.T) {
+	natsURL := strings.TrimSpace(os.Getenv("NATS_URL"))
+	if natsURL == "" {
+		t.Skip("set NATS_URL to run JetStream adapter integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	streamName := "TC_TEST_MESSAGES_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	adapter, err := NewAdapter(ctx, Config{
+		URL:            natsURL,
+		StreamName:     streamName,
+		SubjectPrefix:  "tc.test.messages",
+		ConsumerName:   "tc-test-fetch-ack",
+		RequestTimeout: 500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("create adapter: %v", err)
+	}
+	defer adapter.Close()
+	defer adapter.js.DeleteStream(streamName)
+
+	message := domain.Message{
+		MessageRef:       "tc://message/msg_jetstream_fetch_ack",
+		DeliveryRef:      "tc://delivery/dlv_jetstream_fetch_ack",
+		TargetCapability: "code.change",
+		CorrelationRef:   "tc://task/tsk_jetstream_fetch_ack",
+		State:            domain.MessageStateAvailable,
+	}
+	if _, err := adapter.PublishAcceptedMessage(message); err != nil {
+		t.Fatalf("publish accepted message: %v", err)
+	}
+
+	record, found, err := adapter.FetchNextDelivery(applicationFetchRequest("worker-1", "code.change"))
+	if err != nil {
+		t.Fatalf("fetch delivery: %v", err)
+	}
+	if !found {
+		t.Fatal("expected fetched delivery")
+	}
+	if record.DeliveryRef != message.DeliveryRef || record.MessageRef != message.MessageRef {
+		t.Fatalf("expected public refs from headers, got %+v", record)
+	}
+	if record.Subject != "tc.test.messages.code.change" {
+		t.Fatalf("expected capability subject, got %q", record.Subject)
+	}
+	if record.Metadata[HeaderCorrelationRef] != message.CorrelationRef || record.Metadata["adapter_stream"] != streamName {
+		t.Fatalf("expected metadata to preserve correlation and stream, got %+v", record.Metadata)
+	}
+	if err := adapter.AckDelivery(record.DeliveryRef); err != nil {
+		t.Fatalf("ack delivery: %v", err)
+	}
+
+	_, found, err = adapter.FetchNextDelivery(applicationFetchRequest("worker-1", "code.change"))
+	if err != nil {
+		t.Fatalf("fetch after ack: %v", err)
+	}
+	if found {
+		t.Fatal("expected no delivery after ack")
+	}
+}
+
+func TestAdapterNaksDeliveryForRedelivery(t *testing.T) {
+	natsURL := strings.TrimSpace(os.Getenv("NATS_URL"))
+	if natsURL == "" {
+		t.Skip("set NATS_URL to run JetStream adapter integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	streamName := "TC_TEST_MESSAGES_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	adapter, err := NewAdapter(ctx, Config{
+		URL:            natsURL,
+		StreamName:     streamName,
+		SubjectPrefix:  "tc.test.messages",
+		ConsumerName:   "tc-test-fetch-nak",
+		RequestTimeout: 500 * time.Millisecond,
+		MaxDeliver:     3,
+	})
+	if err != nil {
+		t.Fatalf("create adapter: %v", err)
+	}
+	defer adapter.Close()
+	defer adapter.js.DeleteStream(streamName)
+
+	message := domain.Message{
+		MessageRef:       "tc://message/msg_jetstream_fetch_nak",
+		DeliveryRef:      "tc://delivery/dlv_jetstream_fetch_nak",
+		TargetCapability: "code.change",
+		State:            domain.MessageStateAvailable,
+	}
+	if _, err := adapter.PublishAcceptedMessage(message); err != nil {
+		t.Fatalf("publish accepted message: %v", err)
+	}
+
+	first, found, err := adapter.FetchNextDelivery(applicationFetchRequest("worker-1", "code.change"))
+	if err != nil {
+		t.Fatalf("fetch delivery: %v", err)
+	}
+	if !found {
+		t.Fatal("expected fetched delivery")
+	}
+	if err := adapter.NakDelivery(first.DeliveryRef, "test redelivery"); err != nil {
+		t.Fatalf("nak delivery: %v", err)
+	}
+
+	second, found, err := adapter.FetchNextDelivery(applicationFetchRequest("worker-1", "code.change"))
+	if err != nil {
+		t.Fatalf("fetch after nak: %v", err)
+	}
+	if !found {
+		t.Fatal("expected redelivered delivery")
+	}
+	if second.DeliveryRef != first.DeliveryRef || second.MessageRef != first.MessageRef {
+		t.Fatalf("expected same public refs after redelivery, first=%+v second=%+v", first, second)
+	}
+	if second.Metadata["adapter_num_delivered"] != "2" {
+		t.Fatalf("expected second delivery metadata, got %+v", second.Metadata)
+	}
+	if err := adapter.AckDelivery(second.DeliveryRef); err != nil {
+		t.Fatalf("ack redelivered delivery: %v", err)
+	}
+}
+
+func applicationFetchRequest(endpointRef string, capabilities ...string) application.DeliveryFetchRequest {
+	return application.DeliveryFetchRequest{EndpointRef: endpointRef, Capabilities: capabilities}
 }

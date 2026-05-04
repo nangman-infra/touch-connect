@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -17,9 +18,13 @@ import (
 const (
 	defaultStreamName      = "TOUCH_CONNECT_MESSAGES"
 	defaultSubjectPrefix   = "tc.messages"
+	defaultConsumerName    = "touch-connect-delivery"
 	defaultConnectTimeout  = 2 * time.Second
 	defaultRequestTimeout  = 2 * time.Second
 	defaultDuplicateWindow = 2 * time.Minute
+	defaultFetchBatchSize  = 1
+	defaultAckWait         = 30 * time.Second
+	defaultMaxDeliver      = 5
 
 	HeaderMessageRef     = "tc_message_ref"
 	HeaderDeliveryRef    = "tc_delivery_ref"
@@ -31,26 +36,36 @@ const (
 var (
 	ErrURLRequired               = errors.New("jetstream url is required")
 	ErrInvalidStreamName         = errors.New("jetstream stream name is invalid")
+	ErrInvalidConsumerName       = errors.New("jetstream consumer name is invalid")
 	ErrMessageRefRequired        = errors.New("message_ref is required")
 	ErrDeliveryRefRequired       = errors.New("delivery_ref is required")
 	ErrFetchRequiresPullConsumer = errors.New("jetstream delivery fetch requires pull consumer binding")
 	ErrAckRequiresDeliveryState  = errors.New("jetstream delivery ack requires fetched delivery state")
 	ErrNakRequiresDeliveryState  = errors.New("jetstream delivery nak requires fetched delivery state")
+	ErrDeliveryAlreadyPending    = errors.New("jetstream delivery is already pending")
+	ErrDeliveryNotPending        = errors.New("jetstream delivery is not pending")
 )
 
 type Config struct {
 	URL             string
 	StreamName      string
 	SubjectPrefix   string
+	ConsumerName    string
 	ConnectTimeout  time.Duration
 	RequestTimeout  time.Duration
 	DuplicateWindow time.Duration
+	FetchBatchSize  int
+	AckWait         time.Duration
+	MaxDeliver      int
 }
 
 type Adapter struct {
-	config Config
-	conn   *nats.Conn
-	js     nats.JetStreamContext
+	config       Config
+	conn         *nats.Conn
+	js           nats.JetStreamContext
+	subscription *nats.Subscription
+	pendingMu    sync.Mutex
+	pending      map[string]*nats.Msg
 }
 
 var _ application.DeliveryAdapter = (*Adapter)(nil)
@@ -76,8 +91,16 @@ func NewAdapter(ctx context.Context, config Config) (*Adapter, error) {
 		conn.Close()
 		return nil, err
 	}
-	adapter := &Adapter{config: accepted, conn: conn, js: js}
+	adapter := &Adapter{config: accepted, conn: conn, js: js, pending: map[string]*nats.Msg{}}
 	if err := adapter.ensureStream(ctx); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := adapter.ensureConsumer(ctx); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := adapter.bindPullConsumer(); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -87,6 +110,9 @@ func NewAdapter(ctx context.Context, config Config) (*Adapter, error) {
 func (a *Adapter) Close() {
 	if a == nil || a.conn == nil {
 		return
+	}
+	if a.subscription != nil {
+		_ = a.subscription.Unsubscribe()
 	}
 	a.conn.Close()
 }
@@ -141,21 +167,80 @@ func (a *Adapter) PublishAcceptedMessage(message domain.Message) (application.De
 }
 
 func (a *Adapter) FetchNextDelivery(request application.DeliveryFetchRequest) (application.DeliveryRecord, bool, error) {
-	return application.DeliveryRecord{}, false, ErrFetchRequiresPullConsumer
+	if a.subscription == nil {
+		return application.DeliveryRecord{}, false, ErrFetchRequiresPullConsumer
+	}
+	allowedSubjects := a.subjectsForCapabilities(request.Capabilities)
+	if len(allowedSubjects) == 0 {
+		return application.DeliveryRecord{}, false, nil
+	}
+	messages, err := a.subscription.Fetch(a.config.FetchBatchSize, nats.MaxWait(a.config.RequestTimeout))
+	if errors.Is(err, nats.ErrTimeout) {
+		return application.DeliveryRecord{}, false, nil
+	}
+	if err != nil {
+		return application.DeliveryRecord{}, false, err
+	}
+	for _, message := range messages {
+		if !allowedSubjects[message.Subject] {
+			if nakErr := message.Nak(); nakErr != nil {
+				return application.DeliveryRecord{}, false, nakErr
+			}
+			continue
+		}
+		record := a.deliveryRecordFromMessage(message)
+		if record.DeliveryRef == "" {
+			if nakErr := message.Nak(); nakErr != nil {
+				return application.DeliveryRecord{}, false, nakErr
+			}
+			return application.DeliveryRecord{}, false, ErrDeliveryRefRequired
+		}
+		if record.MessageRef == "" {
+			if nakErr := message.Nak(); nakErr != nil {
+				return application.DeliveryRecord{}, false, nakErr
+			}
+			return application.DeliveryRecord{}, false, ErrMessageRefRequired
+		}
+		if err := a.trackPendingDelivery(record.DeliveryRef, message); err != nil {
+			if nakErr := message.Nak(); nakErr != nil {
+				return application.DeliveryRecord{}, false, nakErr
+			}
+			return application.DeliveryRecord{}, false, err
+		}
+		return record, true, nil
+	}
+	return application.DeliveryRecord{}, false, nil
 }
 
 func (a *Adapter) AckDelivery(deliveryRef string) error {
 	if deliveryRef == "" {
 		return ErrDeliveryRefRequired
 	}
-	return ErrAckRequiresDeliveryState
+	message, ok := a.pendingDelivery(deliveryRef)
+	if !ok {
+		return ErrDeliveryNotPending
+	}
+	if err := message.Ack(); err != nil {
+		return err
+	}
+	a.removePendingDelivery(deliveryRef)
+	return nil
 }
 
 func (a *Adapter) NakDelivery(deliveryRef string, reason string) error {
 	if deliveryRef == "" {
 		return ErrDeliveryRefRequired
 	}
-	return ErrNakRequiresDeliveryState
+	_ = reason
+	message, ok := a.pendingDelivery(deliveryRef)
+	if !ok {
+		return ErrDeliveryNotPending
+	}
+	if err := message.Nak(); err != nil {
+		return err
+	}
+	a.removePendingDelivery(deliveryRef)
+	return nil
 }
 
 func (a *Adapter) ensureStream(ctx context.Context) error {
@@ -175,8 +260,108 @@ func (a *Adapter) ensureStream(ctx context.Context) error {
 	return err
 }
 
+func (a *Adapter) ensureConsumer(ctx context.Context) error {
+	cfg := &nats.ConsumerConfig{
+		Durable:         a.config.ConsumerName,
+		Name:            a.config.ConsumerName,
+		AckPolicy:       nats.AckExplicitPolicy,
+		AckWait:         a.config.AckWait,
+		MaxDeliver:      a.config.MaxDeliver,
+		FilterSubject:   a.config.SubjectPrefix + ".>",
+		MaxRequestBatch: a.config.FetchBatchSize,
+	}
+	_, err := a.js.AddConsumer(a.config.StreamName, cfg, nats.Context(ctx))
+	return err
+}
+
+func (a *Adapter) bindPullConsumer() error {
+	subscription, err := a.js.PullSubscribe(
+		a.config.SubjectPrefix+".>",
+		a.config.ConsumerName,
+		nats.Bind(a.config.StreamName, a.config.ConsumerName),
+		nats.ManualAck(),
+	)
+	if err != nil {
+		return err
+	}
+	a.subscription = subscription
+	return nil
+}
+
 func (a *Adapter) subjectForCapability(capability string) string {
 	return a.config.SubjectPrefix + "." + sanitizeSubjectToken(capability)
+}
+
+func (a *Adapter) subjectsForCapabilities(capabilities []string) map[string]bool {
+	subjects := map[string]bool{}
+	for _, capability := range capabilities {
+		capability = strings.TrimSpace(capability)
+		if capability == "" {
+			continue
+		}
+		subjects[a.subjectForCapability(capability)] = true
+	}
+	return subjects
+}
+
+func (a *Adapter) deliveryRecordFromMessage(message *nats.Msg) application.DeliveryRecord {
+	metadata := map[string]string{
+		"adapter_subject": message.Subject,
+	}
+	copyHeader(metadata, message.Header, HeaderMessageRef)
+	copyHeader(metadata, message.Header, HeaderDeliveryRef)
+	copyHeader(metadata, message.Header, HeaderAttemptRef)
+	copyHeader(metadata, message.Header, HeaderCorrelationRef)
+	copyHeader(metadata, message.Header, HeaderCapability)
+	if msgMetadata, err := message.Metadata(); err == nil {
+		metadata["adapter_stream"] = msgMetadata.Stream
+		metadata["adapter_consumer"] = msgMetadata.Consumer
+		metadata["adapter_stream_seq"] = strconv.FormatUint(msgMetadata.Sequence.Stream, 10)
+		metadata["adapter_consumer_seq"] = strconv.FormatUint(msgMetadata.Sequence.Consumer, 10)
+		metadata["adapter_num_delivered"] = strconv.FormatUint(msgMetadata.NumDelivered, 10)
+		metadata["adapter_num_pending"] = strconv.FormatUint(msgMetadata.NumPending, 10)
+	}
+	return application.DeliveryRecord{
+		DeliveryRef: message.Header.Get(HeaderDeliveryRef),
+		MessageRef:  message.Header.Get(HeaderMessageRef),
+		Subject:     message.Subject,
+		Metadata:    metadata,
+	}
+}
+
+func copyHeader(metadata map[string]string, headers nats.Header, key string) {
+	if value := headers.Get(key); value != "" {
+		metadata[key] = value
+	}
+}
+
+func (a *Adapter) trackPendingDelivery(deliveryRef string, message *nats.Msg) error {
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	if a.pending == nil {
+		a.pending = map[string]*nats.Msg{}
+	}
+	if _, ok := a.pending[deliveryRef]; ok {
+		return ErrDeliveryAlreadyPending
+	}
+	a.pending[deliveryRef] = message
+	return nil
+}
+
+func (a *Adapter) pendingDelivery(deliveryRef string) (*nats.Msg, bool) {
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	if a.pending == nil {
+		return nil, false
+	}
+	message, ok := a.pending[deliveryRef]
+	return message, ok
+}
+
+func (a *Adapter) removePendingDelivery(deliveryRef string) {
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	delete(a.pending, deliveryRef)
 }
 
 func (c Config) validated() (Config, error) {
@@ -191,6 +376,13 @@ func (c Config) validated() (Config, error) {
 	if !validStreamName(c.StreamName) {
 		return Config{}, ErrInvalidStreamName
 	}
+	c.ConsumerName = strings.TrimSpace(c.ConsumerName)
+	if c.ConsumerName == "" {
+		c.ConsumerName = defaultConsumerName
+	}
+	if !validStreamName(c.ConsumerName) {
+		return Config{}, ErrInvalidConsumerName
+	}
 	c.SubjectPrefix = strings.Trim(strings.TrimSpace(c.SubjectPrefix), ".")
 	if c.SubjectPrefix == "" {
 		c.SubjectPrefix = defaultSubjectPrefix
@@ -203,6 +395,15 @@ func (c Config) validated() (Config, error) {
 	}
 	if c.DuplicateWindow <= 0 {
 		c.DuplicateWindow = defaultDuplicateWindow
+	}
+	if c.FetchBatchSize <= 0 {
+		c.FetchBatchSize = defaultFetchBatchSize
+	}
+	if c.AckWait <= 0 {
+		c.AckWait = defaultAckWait
+	}
+	if c.MaxDeliver <= 0 {
+		c.MaxDeliver = defaultMaxDeliver
 	}
 	return c, nil
 }

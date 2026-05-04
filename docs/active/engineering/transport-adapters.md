@@ -229,16 +229,17 @@ NATS_URL=nats://127.0.0.1:4222 NATS_MONITOR_URL=http://127.0.0.1:8222 go test -t
 
 `docker-compose.dev.yml`의 `nats` service는 official `nats` image를 `-js`로 실행하고 `-sd /data`로 JetStream data directory를 명시한다.
 `tests/jetstream_integration_test.go`는 `/jsz` monitor endpoint를 확인해 JetStream이 켜져 있는지 검증한다.
-`tc-server/internal/infrastructure/jetstream/adapter_integration_test.go`는 실제 adapter publish, `Nats-Msg-Id` dedupe, stored metadata headers를 검증한다.
+`tc-server/internal/infrastructure/jetstream/adapter_integration_test.go`는 실제 adapter publish, `Nats-Msg-Id` dedupe, stored metadata headers, pull consumer fetch, ack/nak redelivery를 검증한다.
 
-adapter publish 검증:
+adapter lifecycle 검증:
 
 ```bash
 NATS_URL=nats://127.0.0.1:4222 go test -tags=integration,jetstream ./tc-server/internal/infrastructure/jetstream
 ```
 
-현재 concrete adapter는 `PublishAcceptedMessage`까지 구현한다.
-pull consumer fetch와 ack/nak delivery state는 다음 단계에서 구현한다.
+현재 concrete adapter는 `PublishAcceptedMessage`, `FetchNextDelivery`, `AckDelivery`, `NakDelivery`까지 구현한다.
+`FetchNextDelivery`는 durable pull consumer에서 후보 delivery를 가져와 `delivery_ref` 기준 in-process pending state에 묶는다.
+이 pending state는 broker ack/nak 연결용이며 domain attempt completion이나 durable task history를 대체하지 않는다.
 
 ## Stop Doing Enforcement
 

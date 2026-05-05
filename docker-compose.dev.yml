@@ -39,6 +39,8 @@ services:
 
   tc-worker-echo:
     image: touch-connect:dev
+    profiles:
+      - smoke
     command:
       - tc-worker
     depends_on:

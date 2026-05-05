@@ -36,7 +36,7 @@ Operator APIs, admin workflows, approvals, retries, DLQ replay, and inspection b
 
 ## Standalone Compose
 
-The standalone local stack is Docker Compose first. It starts `tc-server`, `tc-control`, a basic `code.change` worker, SQLite-backed state, artifact storage, and the dev NATS service:
+The standalone local stack is Docker Compose first. It starts `tc-server`, `tc-control`, SQLite-backed state, artifact storage, and the dev NATS service:
 
 ```sh
 docker compose -f docker-compose.dev.yml up -d --build
@@ -46,8 +46,14 @@ Useful commands:
 
 ```sh
 docker compose -f docker-compose.dev.yml ps
-docker compose -f docker-compose.dev.yml logs -f tc-server tc-control tc-worker-echo
+docker compose -f docker-compose.dev.yml logs -f tc-server tc-control
 docker compose -f docker-compose.dev.yml run --rm tcctl endpoint list
+```
+
+To run the smoke-test echo worker explicitly:
+
+```sh
+docker compose -f docker-compose.dev.yml --profile smoke up -d tc-worker-echo
 docker compose -f docker-compose.dev.yml run --rm tcctl message send \
   --capability code.change \
   --summary "compose smoke" \
@@ -92,11 +98,11 @@ There are two roles:
 - Manager/operator: decides what should happen, watches the system, and sends messages with `tcctl`.
 - Worker AI: runs `tc-worker join`, stays registered as an endpoint, advertises capabilities from `SKILL.md`, waits for messages, executes received tasks, and records evidence. It does not send its own test message or grade its own result.
 
-The compose `tc-worker-echo` service is only a smoke-test worker. The manager should stop it when a host AI worker should receive `code.change`, otherwise both workers can race for the same capability:
+The compose `tc-worker-echo` service is only a smoke-test worker and is not started by default. It is attached to the `smoke` profile so the normal stack does not race with a host AI worker for `code.change`:
 
 ```sh
 cd /absolute/path/to/touch-connect
-docker compose -f docker-compose.dev.yml stop tc-worker-echo
+docker compose -f docker-compose.dev.yml --profile smoke up -d tc-worker-echo
 ```
 
 ### Worker AI Terminal

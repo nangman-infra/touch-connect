@@ -6,18 +6,19 @@ CLAUDE_MODEL ?= opus[1m]
 .PHONY: dev-up dev-down dev-logs dev-ps smoke worker host-codex-worker host-claude-worker host-gemini-worker
 
 dev-up:
-	$(COMPOSE) up -d --build nats tc-server tc-control tc-worker-echo
+	$(COMPOSE) up -d --build nats tc-server tc-control
 
 dev-down:
 	$(COMPOSE) down
 
 dev-logs:
-	$(COMPOSE) logs -f nats tc-server tc-control tc-worker-echo
+	$(COMPOSE) logs -f nats tc-server tc-control
 
 dev-ps:
 	$(COMPOSE) ps
 
 smoke:
+	$(COMPOSE) --profile smoke up -d --build nats tc-server tc-control tc-worker-echo
 	$(COMPOSE) run --rm tcctl endpoint list
 	$(COMPOSE) run --rm tcctl message send --capability code.change --summary "compose smoke" --body "Verify compose echo worker can receive and complete a message." --quality-gate=skip
 

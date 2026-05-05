@@ -70,6 +70,14 @@ Local AI CLI workers remain host-side by default because Codex, Claude Code, Gem
 make host-codex-worker
 ```
 
+For Claude Max users, the easiest worker path is:
+
+```sh
+make host-claude-worker
+```
+
+That target uses `--backend claude --model 'opus[1m]'` by default. On Claude Code Max plans, this targets Opus 4.7 with the 1M context window. Worker join presets are non-interactive by default: Claude uses `--permission-mode bypassPermissions`, Codex uses `approval_policy="never"`, Gemini uses `--approval-mode yolo`, and Kiro uses `--trust-all-tools`. This is intentionally powerful and risky; run it only in a trusted local workspace.
+
 ## Local AI Handoff Roles
 
 The canonical worker onboarding contract is [WORKER.md](./WORKER.md). If an AI session is asked to become a worker, it should read that file first. The project contract, not a one-off user prompt, defines what "worker" means.
@@ -94,10 +102,9 @@ Preferred worker start commands:
 
 ```sh
 cd /absolute/path/to/touch-connect
-CLAUDE_MODEL=your-claude-model
 go run ./tc-worker/cmd/tc-worker join \
   --backend claude \
-  --model "$CLAUDE_MODEL" \
+  --model 'opus[1m]' \
   --skills-dir /absolute/path/to/touch-connect/examples/skills \
   --capabilities code.change
 ```

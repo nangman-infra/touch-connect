@@ -41,15 +41,16 @@ Server readiness, conflicting worker shutdown, message sending, and pass/fail ve
 From the repository root:
 
 ```sh
-CLAUDE_MODEL=your-claude-model
 go run ./tc-worker/cmd/tc-worker join \
   --backend claude \
-  --model "$CLAUDE_MODEL" \
+  --model 'opus[1m]' \
   --skills-dir /absolute/path/to/touch-connect/examples/skills \
   --capabilities code.change
 ```
 
 After this command starts, the worker should stay in the foreground and wait. Seeing no worker chat output is normal. The manager verifies endpoint registration from another terminal.
+
+Claude joins with `--permission-mode bypassPermissions` by default. That prevents Claude Code from stopping mid-handoff for local permission prompts. Use this only in a trusted local workspace.
 
 For a Codex worker:
 
@@ -73,6 +74,13 @@ go run ./tc-worker/cmd/tc-worker join \
 ```
 
 Kiro is exposed as a backend preset too, but it depends on a local headless Kiro CLI being installed and authenticated.
+
+Default join presets must not wait for interactive approval:
+
+- Claude: `--permission-mode bypassPermissions`
+- Codex: `approval_policy="never"`
+- Gemini: `--approval-mode yolo`
+- Kiro: `--trust-all-tools`
 
 ## Raw Worker Environment
 

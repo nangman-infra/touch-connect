@@ -221,10 +221,10 @@ func presetForBackend(backend string) (backendPreset, error) {
 		return backendPreset{
 			Backend:      BackendClaude,
 			Command:      "claude",
-			DefaultModel: "",
+			DefaultModel: "opus[1m]",
 			DisplayName:  "Claude",
 			BuildArgs: func(model string, _ string) []string {
-				args := []string{"-p"}
+				args := []string{"-p", "--permission-mode", "bypassPermissions"}
 				if model != "" {
 					args = append(args, "--model", model)
 				}
@@ -252,7 +252,7 @@ func presetForBackend(backend string) (backendPreset, error) {
 			DefaultModel: "",
 			DisplayName:  "Gemini",
 			BuildArgs: func(model string, _ string) []string {
-				args := []string{"-p", "{{prompt}}"}
+				args := []string{"-p", "{{prompt}}", "--approval-mode", "yolo"}
 				if model != "" {
 					args = append([]string{"--model", model}, args...)
 				}
@@ -266,11 +266,7 @@ func presetForBackend(backend string) (backendPreset, error) {
 			DefaultModel: "",
 			DisplayName:  "Kiro",
 			BuildArgs: func(model string, _ string) []string {
-				args := []string{"chat", "--no-interactive"}
-				if model != "" {
-					args = append(args, "--model", model)
-				}
-				return append(args, "{{prompt}}")
+				return []string{"chat", "--no-interactive", "--trust-all-tools", "{{prompt}}"}
 			},
 		}, nil
 	default:

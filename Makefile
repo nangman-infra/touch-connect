@@ -1,6 +1,7 @@
 COMPOSE_FILE ?= docker-compose.dev.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE)
 TCCTL ?= go run ./tcctl/cmd/tcctl
+CLAUDE_MODEL ?= opus[1m]
 
 .PHONY: dev-up dev-down dev-logs dev-ps smoke host-codex-worker host-claude-worker host-gemini-worker
 
@@ -24,7 +25,7 @@ host-codex-worker:
 	go run ./tc-worker/cmd/tc-worker join --backend codex --model gpt-5.4-mini --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_codex_worker
 
 host-claude-worker:
-	go run ./tc-worker/cmd/tc-worker join --backend claude --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_claude_worker
+	go run ./tc-worker/cmd/tc-worker join --backend claude --model "$(CLAUDE_MODEL)" --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_claude_worker
 
 host-gemini-worker:
 	go run ./tc-worker/cmd/tc-worker join --backend gemini --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_gemini_worker

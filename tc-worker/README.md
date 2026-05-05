@@ -93,15 +93,14 @@ Skill settings:
 Preferred local AI worker startup:
 
 ```sh
-CLAUDE_MODEL=your-claude-model
 go run ./tc-worker/cmd/tc-worker join \
   --backend claude \
-  --model "$CLAUDE_MODEL" \
+  --model 'opus[1m]' \
   --skills-dir /absolute/path/to/touch-connect/examples/skills \
   --capabilities code.change
 ```
 
-Backend presets are `claude`, `codex`, `gemini`, and `kiro`. The selected backend/model are recorded in endpoint execution hints.
+Backend presets are `claude`, `codex`, `gemini`, and `kiro`. The selected backend/model are recorded in endpoint execution hints. Presets are non-interactive by default so an AI-to-AI handoff does not stall on a local approval prompt.
 
 Raw debugging equivalent:
 

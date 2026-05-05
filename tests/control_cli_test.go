@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -142,6 +144,82 @@ func TestTCCTLListsEndpointsAndSendsMessageThroughControl(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "quality=") || !strings.Contains(stdout.String(), "quality_decision="+sent.QualityDecisionRef) {
 		t.Fatalf("expected quality details in message inspect output, got %q", stdout.String())
+	}
+}
+
+func TestTCCTLSkillRegisterListInspectUsesLocalRegistry(t *testing.T) {
+	dir := t.TempDir()
+	skillPath := filepath.Join(dir, "review-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatalf("create skill dir: %v", err)
+	}
+	skillBody := `---
+skill_ref: tc://skill/review
+name: Review Skill
+kind: guidance
+capabilities:
+  - ai.review
+---
+# Review Skill
+
+Read the previous AI output and check whether the handoff is auditable.
+`
+	if err := os.WriteFile(skillPath, []byte(skillBody), 0o600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	registryPath := filepath.Join(dir, "registry.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := tcctl.Run(context.Background(), []string{
+		"--json",
+		"skill", "register", skillPath,
+		"--registry", registryPath,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl skill register failed: %v stderr=%s", err, stderr.String())
+	}
+	var registered contracts.SkillDefinition
+	if err := json.Unmarshal(stdout.Bytes(), &registered); err != nil {
+		t.Fatalf("decode registered skill: %v\n%s", err, stdout.String())
+	}
+	if registered.SkillRef != "tc://skill/review" || len(registered.Capabilities) != 1 {
+		t.Fatalf("unexpected registered skill: %+v", registered)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--json",
+		"skill", "list",
+		"--registry", registryPath,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl skill list failed: %v stderr=%s", err, stderr.String())
+	}
+	var listed []contracts.SkillDefinition
+	if err := json.Unmarshal(stdout.Bytes(), &listed); err != nil {
+		t.Fatalf("decode skill list: %v\n%s", err, stdout.String())
+	}
+	if len(listed) != 1 || listed[0].SkillRef != registered.SkillRef {
+		t.Fatalf("expected listed skill, got %+v", listed)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--json",
+		"skill", "inspect", "tc://skill/review",
+		"--registry", registryPath,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl skill inspect failed: %v stderr=%s", err, stderr.String())
+	}
+	var inspected contracts.SkillDefinition
+	if err := json.Unmarshal(stdout.Bytes(), &inspected); err != nil {
+		t.Fatalf("decode skill inspect: %v\n%s", err, stdout.String())
+	}
+	if inspected.Body == "" || !strings.Contains(inspected.Body, "handoff is auditable") {
+		t.Fatalf("expected inspect to include skill body, got %+v", inspected)
 	}
 }
 

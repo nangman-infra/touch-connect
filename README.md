@@ -15,7 +15,7 @@ Root app units:
 - `tc-control`
   - control plane backend API for `tcctl` and `admin`
 - `tc-worker`
-  - execution endpoint runtime
+  - execution endpoint runtime, including skill-guided AI workers that read local `SKILL.md` guidance and run local AI CLIs such as Codex or Claude Code
 - `tcctl`
   - operator/admin CLI
 - `admin`

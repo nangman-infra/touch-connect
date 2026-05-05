@@ -58,6 +58,10 @@ func (c *recoverableDropClient) Version(context.Context) (contracts.VersionRespo
 	return contracts.VersionResponse{}, nil
 }
 
+func (c *recoverableDropClient) Snapshot(context.Context) (contracts.SnapshotResponse, error) {
+	return contracts.SnapshotResponse{}, nil
+}
+
 func (c *recoverableDropClient) RegisterEndpoint(context.Context, contracts.EndpointRegistrationRequest) (contracts.EndpointRegistrationResponse, error) {
 	return contracts.EndpointRegistrationResponse{}, nil
 }

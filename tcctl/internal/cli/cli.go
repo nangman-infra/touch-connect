@@ -85,6 +85,9 @@ func (r Runtime) ensureCompatible(ctx context.Context, args []string) error {
 	if len(args) >= 2 && args[0] == "server" && args[1] == "version" {
 		return nil
 	}
+	if len(args) >= 1 && args[0] == "skill" {
+		return nil
+	}
 	version, err := r.client.Version(ctx)
 	if err != nil {
 		return unavailableError(err)
@@ -113,6 +116,8 @@ func (r Runtime) dispatch(ctx context.Context, args []string) error {
 		return r.approval(ctx, args[1:])
 	case "dlq":
 		return r.dlq(ctx, args[1:])
+	case "skill":
+		return r.skill(ctx, args[1:])
 	case "scenario":
 		return r.scenario(ctx, args[1:])
 	case "-h", "--help":
@@ -177,6 +182,7 @@ func writeRootHelp(w io.Writer) {
 	fmt.Fprintln(w, "  artifact    list, inspect, lineage, and finalize artifact versions")
 	fmt.Fprintln(w, "  approval    list, inspect, chain, approve, and reject approval records")
 	fmt.Fprintln(w, "  dlq         list and inspect dead-letter records")
+	fmt.Fprintln(w, "  skill       register, list, and inspect local AI skills")
 	fmt.Fprintln(w, "  scenario    run and verify canonical scenario records")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "use \"tcctl help <group>\" or \"tcctl <group> <command> -h\" for command help")
@@ -206,6 +212,8 @@ func (r Runtime) help(args []string) error {
 		return r.approval(context.Background(), append([]string{"help"}, args[1:]...))
 	case "dlq":
 		return r.dlq(context.Background(), append([]string{"help"}, args[1:]...))
+	case "skill":
+		return r.skill(context.Background(), append([]string{"help"}, args[1:]...))
 	case "scenario":
 		return r.scenario(context.Background(), append([]string{"help"}, args[1:]...))
 	default:

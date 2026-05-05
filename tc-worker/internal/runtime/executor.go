@@ -26,6 +26,7 @@ type ExecutionInput struct {
 	CorrelationRef     string
 	Payload            contracts.Payload
 	Constraints        []contracts.Constraint
+	HandoffContext     HandoffContext
 	Takeover           bool
 	RedeliveryCount    int
 	LastCheckpointRef  string
@@ -33,10 +34,46 @@ type ExecutionInput struct {
 	ResumeArtifactRefs []string
 }
 
+type HandoffContext struct {
+	TaskRef   string
+	Messages  []HandoffMessage
+	Artifacts []HandoffArtifact
+}
+
+type HandoffMessage struct {
+	MessageRef       string
+	TargetCapability string
+	State            string
+	AttemptRef       string
+	RedeliveryCount  int
+	Summary          string
+	Body             string
+}
+
+type HandoffArtifact struct {
+	ArtifactVersionRef string
+	ArtifactRef        string
+	MessageRef         string
+	AttemptRef         string
+	Kind               string
+	MediaType          string
+	StorageRef         string
+	Summary            string
+	Stdout             string
+	Stderr             string
+	UsedSkillRefs      []string
+	Content            string
+}
+
+func (c HandoffContext) Empty() bool {
+	return c.TaskRef == "" && len(c.Messages) == 0 && len(c.Artifacts) == 0
+}
+
 type ExecutionResult struct {
 	Outcome           string
 	Summary           string
 	ArtifactRefs      []string
+	UsedSkillRefs     []string
 	MissingFields     []MissingField
 	FailureReasonCode string
 	Stdout            string

@@ -10,6 +10,7 @@ Responsibilities:
 - inspect endpoints, tasks, messages, checkpoints, artifacts, approvals, and DLQ state
 - approve or reject approval requests
 - request retry or DLQ replay
+- register local AI `SKILL.md` guidance documents
 - run the canonical MVP scenario during development
 
 It is a human control surface, not an execution worker.
@@ -49,6 +50,10 @@ tcctl dlq list
 tcctl dlq inspect <dead_letter_ref>
 tcctl dlq replay <dead_letter_ref>
 
+tcctl skill register /absolute/path/to/SKILL.md
+tcctl skill list
+tcctl skill inspect <skill_ref_or_name>
+
 tcctl scenario run canonical [--task <task_ref>] [--wait=true] [--wait-timeout 10s]
 tcctl scenario verify canonical [--task <task_ref>]
 ```
@@ -62,7 +67,13 @@ tcctl scenario verify canonical [--task <task_ref>]
 --json
 ```
 
-`tcctl` checks the `tc-control` reported contract version before executing commands, except local `--version`, local help output, and `server version` inspection.
+`tcctl skill` commands use a local registry and do not require a running control plane.
+
+```text
+--registry / TCCTL_SKILL_REGISTRY / TC_SKILL_REGISTRY
+```
+
+`tcctl` checks the `tc-control` reported contract version before executing commands, except local `--version`, local help output, `server version` inspection, and local `skill` registry commands.
 
 Use command help without a running control plane:
 

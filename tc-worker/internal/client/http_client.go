@@ -38,6 +38,12 @@ func (c *HTTPClient) Version(ctx context.Context) (contracts.VersionResponse, er
 	return res, err
 }
 
+func (c *HTTPClient) Snapshot(ctx context.Context) (contracts.SnapshotResponse, error) {
+	var res contracts.SnapshotResponse
+	err := c.get(ctx, "/v1/control/snapshot", &res)
+	return res, err
+}
+
 func (c *HTTPClient) RegisterEndpoint(ctx context.Context, req contracts.EndpointRegistrationRequest) (contracts.EndpointRegistrationResponse, error) {
 	var res contracts.EndpointRegistrationResponse
 	err := c.post(ctx, "/v1/endpoints/register", req, &res)

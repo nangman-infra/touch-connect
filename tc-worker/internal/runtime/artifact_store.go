@@ -37,16 +37,17 @@ type LocalArtifactStore struct {
 }
 
 type ExecutionLogArtifact struct {
-	MessageRef        string `json:"message_ref"`
-	AttemptRef        string `json:"attempt_ref"`
-	TargetCapability  string `json:"target_capability"`
-	Outcome           string `json:"outcome"`
-	Summary           string `json:"summary"`
-	FailureReasonCode string `json:"failure_reason_code,omitempty"`
-	Stdout            string `json:"stdout,omitempty"`
-	Stderr            string `json:"stderr,omitempty"`
-	ExitCode          int    `json:"exit_code"`
-	DurationMS        int64  `json:"duration_ms"`
+	MessageRef        string   `json:"message_ref"`
+	AttemptRef        string   `json:"attempt_ref"`
+	TargetCapability  string   `json:"target_capability"`
+	UsedSkillRefs     []string `json:"used_skill_refs,omitempty"`
+	Outcome           string   `json:"outcome"`
+	Summary           string   `json:"summary"`
+	FailureReasonCode string   `json:"failure_reason_code,omitempty"`
+	Stdout            string   `json:"stdout,omitempty"`
+	Stderr            string   `json:"stderr,omitempty"`
+	ExitCode          int      `json:"exit_code"`
+	DurationMS        int64    `json:"duration_ms"`
 }
 
 func NewLocalArtifactStore(options LocalArtifactStoreOptions) (*LocalArtifactStore, error) {
@@ -130,6 +131,7 @@ func executionLogFromResult(input ExecutionInput, result ExecutionResult) Execut
 		MessageRef:        input.MessageRef,
 		AttemptRef:        input.AttemptRef,
 		TargetCapability:  input.TargetCapability,
+		UsedSkillRefs:     append([]string(nil), result.UsedSkillRefs...),
 		Outcome:           result.Outcome,
 		Summary:           result.Summary,
 		FailureReasonCode: result.FailureReasonCode,

@@ -12,6 +12,7 @@ import (
 type ServerClient interface {
 	Health(context.Context) (contracts.HealthResponse, error)
 	Version(context.Context) (contracts.VersionResponse, error)
+	Snapshot(context.Context) (contracts.SnapshotResponse, error)
 	RegisterEndpoint(context.Context, contracts.EndpointRegistrationRequest) (contracts.EndpointRegistrationResponse, error)
 	HeartbeatEndpoint(context.Context, string, contracts.EndpointHeartbeatRequest) (contracts.EndpointHeartbeatResponse, error)
 	AdvertiseCapabilities(context.Context, string, contracts.CapabilityAdvertisementRequest) (contracts.CapabilityAdvertisementResponse, error)
@@ -144,7 +145,8 @@ func (r *Runtime) finishClaimAfterAck(ctx context.Context, claim contracts.Claim
 			err = leaseErr
 		}
 	}()
-	result, err := r.executor.Execute(executionCtx, executionInputFromClaim(claim))
+	input := r.executionInputForClaim(ctx, claim)
+	result, err := r.executor.Execute(executionCtx, input)
 	if err != nil {
 		failedResult := ExecutionResult{
 			Outcome:           ExecutionOutcomeFailed,
@@ -337,6 +339,16 @@ func executionInputFromClaim(claim contracts.ClaimMessageResponse) ExecutionInpu
 		ResumeSummary:      claim.ResumeSummary,
 		ResumeArtifactRefs: claim.ResumeArtifactRefs,
 	}
+}
+
+func (r *Runtime) executionInputForClaim(ctx context.Context, claim contracts.ClaimMessageResponse) ExecutionInput {
+	input := executionInputFromClaim(claim)
+	snapshot, err := r.client.Snapshot(ctx)
+	if err != nil {
+		return input
+	}
+	input.HandoffContext = handoffContextFromSnapshot(claim, snapshot)
+	return input
 }
 
 func (r *Runtime) recordExecutionArtifact(ctx context.Context, claim contracts.ClaimMessageResponse, result ExecutionResult) (ExecutionResult, error) {

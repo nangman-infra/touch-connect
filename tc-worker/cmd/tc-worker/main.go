@@ -80,6 +80,7 @@ func runJoin(ctx context.Context, args []string) error {
 	maxMessages := flags.Int("max-messages", intFromEnv("TC_WORKER_MAX_MESSAGES"), "stop after processing this many messages; 0 means run until interrupted")
 	sandbox := flags.String("sandbox", "read-only", "backend sandbox/profile hint where supported")
 	wizard := flags.Bool("wizard", false, "choose an installed AI CLI backend and model interactively")
+	plain := flags.Bool("plain", false, "disable the worker TUI and use plain text prompts/logs")
 	yes := flags.Bool("yes", false, "accept wizard defaults without prompting")
 	dryRun := flags.Bool("dry-run", false, "print resolved worker environment and exit")
 	flags.Usage = func() {
@@ -116,12 +117,15 @@ func runJoin(ctx context.Context, args []string) error {
 		MaxMessages:       *maxMessages,
 		Sandbox:           *sandbox,
 	}
-	if shouldRunJoinWizard(*wizard, visited) {
+	runWizard := shouldRunJoinWizard(*wizard, visited)
+	useTUI := runWizard && !*plain && !*yes && isTerminal(os.Stdin) && isTerminal(os.Stdout) && os.Getenv("TERM") != "dumb"
+	if runWizard {
 		resolved, err := tcworker.RunJoinWizard(ctx, tcworker.JoinWizardOptions{
 			Input:      os.Stdin,
 			Output:     os.Stdout,
 			Base:       options,
 			AutoAccept: *yes,
+			UseTUI:     useTUI,
 		})
 		if err != nil {
 			return err
@@ -143,6 +147,9 @@ func runJoin(ctx context.Context, args []string) error {
 			fmt.Printf("%s=%s\n", key, value)
 		}
 		return nil
+	}
+	if useTUI {
+		return tcworker.RunWorkerStatusTUI(ctx, env, runEnvWorker)
 	}
 	log.Printf("tc-worker joining backend=%s model=%s endpoint=%s server=%s", env.Backend, env.Model, env.Env["TC_WORKER_ENDPOINT_REF"], env.Env["TC_WORKER_SERVER_URL"])
 	return runEnvWorker(ctx)

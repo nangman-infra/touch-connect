@@ -93,11 +93,19 @@ Skill settings:
 Preferred local AI worker startup:
 
 ```sh
-go run ./tc-worker/cmd/tc-worker join --wizard \
+make worker
+```
+
+The worker TUI detects `claude`, `codex`, `gemini`, and `kiro-cli` on `PATH`, shows ready/missing status, and lets the user choose the backend and model. After join, it stays open as the worker console and shows endpoint state, current message, readback/checkpoint/artifact events, and completion state.
+
+Use `--plain` for scripts or terminal debugging:
+
+```sh
+go run ./tc-worker/cmd/tc-worker join --wizard --plain \
   --skills-dir /absolute/path/to/touch-connect/examples/skills
 ```
 
-The wizard detects `claude`, `codex`, `gemini`, and `kiro-cli` on `PATH`, shows ready/missing status, and lets the user choose the backend and model. In a non-interactive automation path, pass `--backend`, `--model`, and `--skills-dir` directly.
+In a non-interactive automation path, pass `--backend`, `--model`, and `--skills-dir` directly.
 
 Direct Claude startup:
 

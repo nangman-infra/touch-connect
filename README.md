@@ -36,38 +36,53 @@ Operator APIs, admin workflows, approvals, retries, DLQ replay, and inspection b
 
 ## Standalone Compose
 
-The standalone local stack is Docker Compose first. It starts `tc-server`, `tc-control`, SQLite-backed state, artifact storage, and the dev NATS service:
+The standalone local stack is Docker Compose first, with Makefile wrappers as the development command surface. It starts `tc-server`, `tc-control`, SQLite-backed state, artifact storage, and the dev NATS service:
 
 ```sh
-docker compose -f docker-compose.dev.yml up -d --build
+make dev
 ```
 
-Useful commands:
+Use `make dev` for the foreground server view during local work. Use detached mode when you want the stack to stay in the background:
 
 ```sh
-docker compose -f docker-compose.dev.yml ps
-docker compose -f docker-compose.dev.yml logs -f tc-server tc-control
-docker compose -f docker-compose.dev.yml run --rm tcctl endpoint list
+make dev-up
+```
+
+Common development commands:
+
+```sh
+make help
+make dev-ps
+make dev-logs
+make endpoint-list
+make monitor
+```
+
+The manager/operator can send and inspect a demo handoff with one stable task ref:
+
+```sh
+make send-demo
+make watch-demo
+make history-demo
+```
+
+To watch all `code.change` messages as they move through the system:
+
+```sh
+make message-tail
+```
+
+Override the default task or capability without changing files:
+
+```sh
+make send-demo TASK_REF=tc://task/readme_review CAPABILITY=code.change
+make message-tail CAPABILITY=ai.review
 ```
 
 To run the smoke-test echo worker explicitly:
 
 ```sh
-docker compose -f docker-compose.dev.yml --profile smoke up -d tc-worker-echo
-docker compose -f docker-compose.dev.yml run --rm tcctl message send \
-  --capability code.change \
-  --summary "compose smoke" \
-  --body "Verify compose echo worker can receive and complete a message." \
-  --quality-gate=skip
-```
-
-Or use the Makefile wrapper:
-
-```sh
-make dev-up
 make smoke
-make dev-logs
-make dev-down
 ```
 
 Local AI CLI workers remain host-side by default because Codex, Claude Code, Gemini, and Kiro rely on the user's local installation and authentication state. The easiest worker path is the local picker:
@@ -76,7 +91,14 @@ Local AI CLI workers remain host-side by default because Codex, Claude Code, Gem
 make worker
 ```
 
-It detects installed AI CLIs, marks what is ready or missing, lets the user choose the backend/model, then starts `tc-worker join`. For Claude Max users, the default selection is Claude Code with `opus[1m]`.
+It opens the worker TUI, detects installed AI CLIs, marks what is ready or missing, lets the user choose the backend/model, then starts `tc-worker join`. After join, the same TUI shows endpoint state, advertised capabilities, current message, readback/checkpoint/artifact events, and completion state. For Claude Max users, the default selection is Claude Code with `opus[1m]`.
+
+Use plain text mode when testing scripts or debugging a terminal issue:
+
+```sh
+go run ./tc-worker/cmd/tc-worker join --wizard --plain \
+  --skills-dir /absolute/path/to/touch-connect/examples/skills
+```
 
 Direct shortcuts remain available:
 
@@ -102,7 +124,7 @@ The compose `tc-worker-echo` service is only a smoke-test worker and is not star
 
 ```sh
 cd /absolute/path/to/touch-connect
-docker compose -f docker-compose.dev.yml --profile smoke up -d tc-worker-echo
+make smoke
 ```
 
 ### Worker AI Terminal
@@ -111,8 +133,7 @@ Preferred worker start command:
 
 ```sh
 cd /absolute/path/to/touch-connect
-go run ./tc-worker/cmd/tc-worker join --wizard \
-  --skills-dir /absolute/path/to/touch-connect/examples/skills
+make worker
 ```
 
 The wizard shows installed backends first:
@@ -126,6 +147,8 @@ Detected AI CLIs:
 ```
 
 After selection, the worker stays in the foreground and waits. It should not run `tcctl message send`, `tcctl task watch`, or `tcctl task history` to verify itself. Those commands belong to the manager terminal.
+
+The foreground worker screen is expected to stay open. When no message is active it shows `waiting`; when a matching message is delivered it changes through claim, checkpoint, artifact, and completion events. Press `q` to stop the worker.
 
 Direct Claude command:
 
@@ -156,8 +179,8 @@ Watch the live flow first:
 
 ```sh
 cd /absolute/path/to/touch-connect
-docker compose -f docker-compose.dev.yml run --rm tcctl monitor --once
-docker compose -f docker-compose.dev.yml run --rm tcctl message tail --capability code.change
+make monitor
+make message-tail
 ```
 
 In another manager terminal, send the task:
@@ -167,16 +190,9 @@ cd /absolute/path/to/touch-connect
 
 TASK_REF=tc://task/local_ai_handoff_demo
 
-docker compose -f docker-compose.dev.yml run --rm tcctl message send \
-  --capability code.change \
-  --summary "Manager requests worker result" \
-  --body "Role split: the sender is the manager/operator and the receiver is the worker AI. Inspect the current standalone compose + watch/tail flow. Return WORKER_READBACK, WORKER_ACTION, and WORKER_RESULT_READY. Do not modify files." \
-  --task "$TASK_REF" \
-  --readback-required \
-  --quality-gate=skip
-
-docker compose -f docker-compose.dev.yml run --rm tcctl task watch "$TASK_REF" --once
-docker compose -f docker-compose.dev.yml run --rm tcctl task history "$TASK_REF"
+make send-demo TASK_REF="$TASK_REF" DEMO_BODY="Role split: the sender is the manager/operator and the receiver is the worker AI. Inspect the current standalone compose + watch/tail flow. Return WORKER_READBACK, WORKER_ACTION, and WORKER_RESULT_READY. Do not modify files."
+make watch-demo TASK_REF="$TASK_REF"
+make history-demo TASK_REF="$TASK_REF"
 ```
 
 The demo passes only when all of these are true:

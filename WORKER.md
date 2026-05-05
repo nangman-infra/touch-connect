@@ -41,11 +41,10 @@ Server readiness, conflicting worker shutdown, message sending, and pass/fail ve
 From the repository root:
 
 ```sh
-go run ./tc-worker/cmd/tc-worker join --wizard \
-  --skills-dir /absolute/path/to/touch-connect/examples/skills
+make worker
 ```
 
-The wizard detects installed AI CLIs and marks their current state:
+The worker TUI detects installed AI CLIs and marks their current state:
 
 ```text
 Detected AI CLIs:
@@ -68,6 +67,15 @@ go run ./tc-worker/cmd/tc-worker join \
 ```
 
 After this command starts, the worker should stay in the foreground and wait. Seeing no worker chat output is normal. The manager verifies endpoint registration from another terminal.
+
+The worker screen itself should show whether it is waiting, claimed a message, submitted readback/checkpoints, wrote an artifact, or completed. Press `q` only when the manager wants the worker to stop.
+
+Use plain text fallback only for scripts or terminal debugging:
+
+```sh
+go run ./tc-worker/cmd/tc-worker join --wizard --plain \
+  --skills-dir /absolute/path/to/touch-connect/examples/skills
+```
 
 Claude joins with `--permission-mode bypassPermissions` by default. That prevents Claude Code from stopping mid-handoff for local permission prompts. Use this only in a trusted local workspace.
 
@@ -158,11 +166,11 @@ This section is for the manager/operator, not for the worker. A worker should no
 The manager verifies worker readiness and execution with:
 
 ```sh
-docker compose -f docker-compose.dev.yml run --rm tcctl monitor --once
-docker compose -f docker-compose.dev.yml run --rm tcctl endpoint list
-docker compose -f docker-compose.dev.yml run --rm tcctl message tail --capability code.change
-docker compose -f docker-compose.dev.yml run --rm tcctl task watch <task_ref> --once
-docker compose -f docker-compose.dev.yml run --rm tcctl task history <task_ref>
+make monitor
+make endpoint-list
+make message-tail
+make watch-demo TASK_REF=<task_ref>
+make history-demo TASK_REF=<task_ref>
 ```
 
 Pass condition:

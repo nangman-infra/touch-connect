@@ -33,6 +33,7 @@ type JoinWizardOptions struct {
 	Output     io.Writer
 	Base       JoinOptions
 	AutoAccept bool
+	UseTUI     bool
 	LookPath   func(string) (string, error)
 	AuthProbe  func(context.Context, BackendCandidate) (string, string)
 }
@@ -59,6 +60,9 @@ func RunJoinWizard(ctx context.Context, options JoinWizardOptions) (JoinOptions,
 	if len(usable) == 0 {
 		printBackendCandidates(output, candidates)
 		return JoinOptions{}, errors.New("no installed AI CLI backend found; install Claude Code, Codex, Gemini, or Kiro CLI first")
+	}
+	if options.UseTUI && !options.AutoAccept {
+		return runJoinWizardTUI(ctx, options, candidates, usable)
 	}
 
 	reader := bufio.NewReader(input)

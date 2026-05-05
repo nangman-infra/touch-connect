@@ -79,15 +79,23 @@ func runJoin(ctx context.Context, args []string) error {
 	heartbeatInterval := flags.Duration("heartbeat-interval", durationFromEnv("TC_WORKER_HEARTBEAT_INTERVAL"), "endpoint heartbeat interval")
 	maxMessages := flags.Int("max-messages", intFromEnv("TC_WORKER_MAX_MESSAGES"), "stop after processing this many messages; 0 means run until interrupted")
 	sandbox := flags.String("sandbox", "read-only", "backend sandbox/profile hint where supported")
+	wizard := flags.Bool("wizard", false, "choose an installed AI CLI backend and model interactively")
+	yes := flags.Bool("yes", false, "accept wizard defaults without prompting")
 	dryRun := flags.Bool("dry-run", false, "print resolved worker environment and exit")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "usage: tc-worker join [flags]")
+		fmt.Fprintln(flags.Output(), "")
+		fmt.Fprintln(flags.Output(), "with no explicit backend/model/command in an interactive terminal, join starts the worker wizard")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return err
 	}
-	env, err := tcworker.BuildJoinEnvironment(tcworker.JoinOptions{
+	visited := visitedFlags(flags)
+	options := tcworker.JoinOptions{
 		ServerURL:         *serverURL,
 		Backend:           *backend,
 		Model:             *model,
@@ -107,7 +115,20 @@ func runJoin(ctx context.Context, args []string) error {
 		HeartbeatInterval: *heartbeatInterval,
 		MaxMessages:       *maxMessages,
 		Sandbox:           *sandbox,
-	})
+	}
+	if shouldRunJoinWizard(*wizard, visited) {
+		resolved, err := tcworker.RunJoinWizard(ctx, tcworker.JoinWizardOptions{
+			Input:      os.Stdin,
+			Output:     os.Stdout,
+			Base:       options,
+			AutoAccept: *yes,
+		})
+		if err != nil {
+			return err
+		}
+		options = resolved
+	}
+	env, err := tcworker.BuildJoinEnvironment(options)
 	if err != nil {
 		return err
 	}
@@ -156,6 +177,37 @@ func splitArgList(value string) []string {
 	return out
 }
 
+func visitedFlags(flags *flag.FlagSet) map[string]bool {
+	visited := make(map[string]bool)
+	flags.Visit(func(item *flag.Flag) {
+		visited[item.Name] = true
+	})
+	return visited
+}
+
+func shouldRunJoinWizard(force bool, visited map[string]bool) bool {
+	if force {
+		return true
+	}
+	if len(os.Args) > 2 {
+		if visited["backend"] || visited["model"] || visited["command"] || visited["args"] || visited["dry-run"] {
+			return false
+		}
+	}
+	if os.Getenv("TC_WORKER_BACKEND") != "" || os.Getenv("TC_WORKER_AI_CLI_COMMAND") != "" || os.Getenv("TC_WORKER_MODEL") != "" {
+		return false
+	}
+	return isTerminal(os.Stdin) && isTerminal(os.Stdout)
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
 func getenvDefault(key string, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -189,7 +241,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: tc-worker [join] [flags]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "commands:")
-	fmt.Fprintln(w, "  join      start a skill-guided local AI CLI worker")
+	fmt.Fprintln(w, "  join      start a skill-guided local AI CLI worker; interactive terminals can use a backend/model wizard")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "without a command, tc-worker keeps the legacy TC_WORKER_* environment contract")
 }

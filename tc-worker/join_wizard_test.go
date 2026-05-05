@@ -1,0 +1,113 @@
+package tcworker
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+func TestDetectBackendCandidatesMarksInstalledAndMissing(t *testing.T) {
+	lookup := func(command string) (string, error) {
+		switch command {
+		case "claude":
+			return "/mock/bin/claude", nil
+		case "codex":
+			return "/mock/bin/codex", nil
+		default:
+			return "", errors.New("missing")
+		}
+	}
+	probe := func(_ context.Context, candidate BackendCandidate) (string, string) {
+		if candidate.Backend == BackendClaude {
+			return BackendStatusReady, "authenticated"
+		}
+		return BackendStatusAuthUnknown, "installed"
+	}
+
+	candidates := detectBackendCandidates(context.Background(), lookup, probe)
+	if len(candidates) != 4 {
+		t.Fatalf("expected four backend candidates, got %+v", candidates)
+	}
+	assertCandidate(t, candidates[0], BackendClaude, BackendStatusReady, "/mock/bin/claude")
+	assertCandidate(t, candidates[1], BackendCodex, BackendStatusAuthUnknown, "/mock/bin/codex")
+	assertCandidate(t, candidates[2], BackendGemini, BackendStatusMissing, "")
+	assertCandidate(t, candidates[3], BackendKiro, BackendStatusMissing, "")
+}
+
+func TestRunJoinWizardAutoAcceptsFirstUsableBackend(t *testing.T) {
+	lookup := func(command string) (string, error) {
+		if command == "claude" {
+			return "/mock/bin/claude", nil
+		}
+		return "", errors.New("missing")
+	}
+	var out bytes.Buffer
+
+	options, err := RunJoinWizard(context.Background(), JoinWizardOptions{
+		Input:      strings.NewReader(""),
+		Output:     &out,
+		Base:       JoinOptions{SkillsDir: "/tmp/skills"},
+		AutoAccept: true,
+		LookPath:   lookup,
+		AuthProbe: func(_ context.Context, candidate BackendCandidate) (string, string) {
+			return BackendStatusReady, "authenticated"
+		},
+	})
+	if err != nil {
+		t.Fatalf("run join wizard: %v", err)
+	}
+	if options.Backend != BackendClaude || options.Model != "opus[1m]" || options.Command != "/mock/bin/claude" {
+		t.Fatalf("unexpected wizard options: %+v", options)
+	}
+	output := out.String()
+	for _, want := range []string{"Detected AI CLIs", "Available worker choices", "permission: non-interactive auto-approve"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected wizard output to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunJoinWizardCanSelectCodexAndCustomModel(t *testing.T) {
+	lookup := func(command string) (string, error) {
+		switch command {
+		case "claude":
+			return "/mock/bin/claude", nil
+		case "codex":
+			return "/mock/bin/codex", nil
+		default:
+			return "", errors.New("missing")
+		}
+	}
+	input := strings.NewReader("2\n4\ngpt-custom\n\n")
+
+	options, err := RunJoinWizard(context.Background(), JoinWizardOptions{
+		Input:    input,
+		Output:   ioDiscard{},
+		Base:     JoinOptions{SkillsDir: "/tmp/skills"},
+		LookPath: lookup,
+		AuthProbe: func(_ context.Context, candidate BackendCandidate) (string, string) {
+			return BackendStatusAuthUnknown, "installed"
+		},
+	})
+	if err != nil {
+		t.Fatalf("run join wizard: %v", err)
+	}
+	if options.Backend != BackendCodex || options.Model != "gpt-custom" || options.Command != "/mock/bin/codex" {
+		t.Fatalf("unexpected wizard selection: %+v", options)
+	}
+}
+
+func assertCandidate(t *testing.T, candidate BackendCandidate, backend string, status string, path string) {
+	t.Helper()
+	if candidate.Backend != backend || candidate.Status != status || candidate.CommandPath != path {
+		t.Fatalf("unexpected candidate: got %+v want backend=%s status=%s path=%s", candidate, backend, status, path)
+	}
+}
+
+type ioDiscard struct{}
+
+func (ioDiscard) Write(p []byte) (int, error) {
+	return len(p), nil
+}

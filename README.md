@@ -64,15 +64,18 @@ make dev-logs
 make dev-down
 ```
 
-Local AI CLI workers remain host-side by default because Codex, Claude Code, Gemini, and Kiro rely on the user's local installation and authentication state. Attach a host Codex worker to the Compose server with:
+Local AI CLI workers remain host-side by default because Codex, Claude Code, Gemini, and Kiro rely on the user's local installation and authentication state. The easiest worker path is the local picker:
+
+```sh
+make worker
+```
+
+It detects installed AI CLIs, marks what is ready or missing, lets the user choose the backend/model, then starts `tc-worker join`. For Claude Max users, the default selection is Claude Code with `opus[1m]`.
+
+Direct shortcuts remain available:
 
 ```sh
 make host-codex-worker
-```
-
-For Claude Max users, the easiest worker path is:
-
-```sh
 make host-claude-worker
 ```
 
@@ -98,7 +101,27 @@ docker compose -f docker-compose.dev.yml stop tc-worker-echo
 
 ### Worker AI Terminal
 
-Preferred worker start commands:
+Preferred worker start command:
+
+```sh
+cd /absolute/path/to/touch-connect
+go run ./tc-worker/cmd/tc-worker join --wizard \
+  --skills-dir /absolute/path/to/touch-connect/examples/skills
+```
+
+The wizard shows installed backends first:
+
+```text
+Detected AI CLIs:
+  1. Claude       ready        model=opus[1m] path=/opt/homebrew/bin/claude
+  2. Codex        auth_unknown model=default path=/opt/homebrew/bin/codex
+  3. Gemini       missing      command=gemini
+  4. Kiro         missing      command=kiro-cli
+```
+
+After selection, the worker stays in the foreground and waits. It should not run `tcctl message send`, `tcctl task watch`, or `tcctl task history` to verify itself. Those commands belong to the manager terminal.
+
+Direct Claude command:
 
 ```sh
 cd /absolute/path/to/touch-connect
@@ -108,8 +131,6 @@ go run ./tc-worker/cmd/tc-worker join \
   --skills-dir /absolute/path/to/touch-connect/examples/skills \
   --capabilities code.change
 ```
-
-After this starts, the worker stays in the foreground and waits. It should not run `tcctl message send`, `tcctl task watch`, or `tcctl task history` to verify itself. Those commands belong to the manager terminal.
 
 For a Codex worker:
 

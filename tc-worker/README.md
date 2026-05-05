@@ -93,6 +93,15 @@ Skill settings:
 Preferred local AI worker startup:
 
 ```sh
+go run ./tc-worker/cmd/tc-worker join --wizard \
+  --skills-dir /absolute/path/to/touch-connect/examples/skills
+```
+
+The wizard detects `claude`, `codex`, `gemini`, and `kiro-cli` on `PATH`, shows ready/missing status, and lets the user choose the backend and model. In a non-interactive automation path, pass `--backend`, `--model`, and `--skills-dir` directly.
+
+Direct Claude startup:
+
+```sh
 go run ./tc-worker/cmd/tc-worker join \
   --backend claude \
   --model 'opus[1m]' \
@@ -110,7 +119,7 @@ TC_WORKER_SKILL_BACKEND=ai-cli \
 TC_WORKER_SKILLS_DIR=/absolute/path/to/touch-connect/examples/skills \
 TC_WORKER_CAPABILITIES=code.change \
 TC_WORKER_AI_CLI_COMMAND=claude \
-TC_WORKER_AI_CLI_ARGS=-p \
+TC_WORKER_AI_CLI_ARGS='-p,--permission-mode,bypassPermissions,--model,opus[1m]' \
 TC_WORKER_AI_CLI_WORKDIR=/absolute/path/to/touch-connect \
 TC_WORKER_ARTIFACT_DIR=/tmp/tc-worker-ai/artifacts \
 TC_WORKER_SERVER_URL=http://127.0.0.1:8080 \

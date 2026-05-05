@@ -26,7 +26,7 @@ If you are an AI reading this file, do not treat "you are the worker" as a reque
 Use this flow when a human or manager says "you are the worker":
 
 1. Read `README.md`, `tc-worker/README.md`, `tcctl/README.md`, and the selected `SKILL.md`.
-2. Start `tc-worker join` with the selected backend, model, and skill.
+2. Start `tc-worker join --wizard` and choose an installed backend/model, or use an explicit backend command if the manager already chose one.
 3. Keep the worker process running until the manager stops it.
 4. Wait for server-delivered messages.
 5. When a message arrives, `tc-worker` wakes the configured AI CLI and processes the message.
@@ -39,6 +39,25 @@ Server readiness, conflicting worker shutdown, message sending, and pass/fail ve
 ## Preferred Worker Join Command
 
 From the repository root:
+
+```sh
+go run ./tc-worker/cmd/tc-worker join --wizard \
+  --skills-dir /absolute/path/to/touch-connect/examples/skills
+```
+
+The wizard detects installed AI CLIs and marks their current state:
+
+```text
+Detected AI CLIs:
+  1. Claude       ready        model=opus[1m] path=/opt/homebrew/bin/claude
+  2. Codex        auth_unknown model=default path=/opt/homebrew/bin/codex
+  3. Gemini       missing      command=gemini
+  4. Kiro         missing      command=kiro-cli
+```
+
+If Claude Code is installed, the recommended Claude Max default is `opus[1m]`.
+
+Direct Claude command:
 
 ```sh
 go run ./tc-worker/cmd/tc-worker join \
@@ -99,7 +118,7 @@ TC_WORKER_SKILL_BACKEND=ai-cli \
 TC_WORKER_SKILLS_DIR="$(pwd)/examples/skills" \
 TC_WORKER_CAPABILITIES=code.change \
 TC_WORKER_AI_CLI_COMMAND="$(command -v claude)" \
-TC_WORKER_AI_CLI_ARGS="-p" \
+TC_WORKER_AI_CLI_ARGS="-p,--permission-mode,bypassPermissions,--model,opus[1m]" \
 TC_WORKER_AI_CLI_WORKDIR="$(pwd)" \
 TC_WORKER_AI_CLI_TIMEOUT=180s \
 TC_WORKER_ARTIFACT_DIR=/tmp/tc-worker-ai/artifacts \

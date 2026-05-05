@@ -147,6 +147,70 @@ func TestTCCTLListsEndpointsAndSendsMessageThroughControl(t *testing.T) {
 	}
 }
 
+func TestTCCTLBodyFilePreservesMultilinePayload(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+	controlHTTP := httptest.NewServer(control.Handler())
+	defer controlHTTP.Close()
+
+	body := "goal: preserve exact body text\nconstraints: keep quotes \"as-is\", backticks `ok`, and $VAR\nnext_action: worker should read this body\n"
+	bodyFile := filepath.Join(t.TempDir(), "handoff.md")
+	if err := os.WriteFile(bodyFile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write body file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"--json",
+		"message", "send",
+		"--capability", "code.change",
+		"--summary", "body file message",
+		"--body-file", bodyFile,
+		"--task", "task.body-file.1",
+		"--readback-required",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl message send with body-file failed: %v stderr=%s", err, stderr.String())
+	}
+	var sent contracts.MessageIngressResponse
+	if err := json.Unmarshal(stdout.Bytes(), &sent); err != nil {
+		t.Fatalf("decode message send output: %v\n%s", err, stdout.String())
+	}
+	snapshot := server.Snapshot()
+	if len(snapshot.Messages) != 1 || snapshot.Messages[0].Payload.Body != body {
+		t.Fatalf("expected message body to match file exactly, got %+v", snapshot.Messages)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"--json",
+		"task", "create", "task.body-file.2",
+		"--capability", "code.change",
+		"--summary", "body file task",
+		"--body-file", bodyFile,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl task create with body-file failed: %v stderr=%s", err, stderr.String())
+	}
+	snapshot = server.Snapshot()
+	if len(snapshot.Messages) != 2 || snapshot.Messages[1].Payload.Body != body || snapshot.Messages[1].CorrelationRef != "task.body-file.2" {
+		t.Fatalf("expected task create body to match file exactly, got %+v", snapshot.Messages)
+	}
+}
+
 func TestTCCTLWatchAndTailExposeLiveFlow(t *testing.T) {
 	server := tcserver.NewInMemoryServer()
 	serverHTTP := httptest.NewServer(server.Handler())
@@ -227,6 +291,73 @@ func TestTCCTLWatchAndTailExposeLiveFlow(t *testing.T) {
 		if !strings.Contains(monitorOutput, expected) {
 			t.Fatalf("expected %q in monitor output, got %q", expected, monitorOutput)
 		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"manager",
+		"--task", "tc://task/watch-flow",
+		"--once",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl manager failed: %v stderr=%s", err, stderr.String())
+	}
+	managerOutput := stdout.String()
+	for _, expected := range []string{"touch-connect manager", "System task=tc://task/watch-flow", "Workers", "Tasks", "Timeline", "Next", "message completed", "checkpoint completed"} {
+		if !strings.Contains(managerOutput, expected) {
+			t.Fatalf("expected %q in manager output, got %q", expected, managerOutput)
+		}
+	}
+}
+
+func TestTCCTLManagerSendCreatesHandoffAndCockpit(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+	controlHTTP := httptest.NewServer(control.Handler())
+	defer controlHTTP.Close()
+
+	body := "goal: manager cockpit should send from a body file\nnext_action: worker reads the manager task\n"
+	bodyFile := filepath.Join(t.TempDir(), "manager-body.md")
+	if err := os.WriteFile(bodyFile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write body file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"manager",
+		"--send",
+		"--task", "tc://task/manager-cli-send",
+		"--capability", "code.change",
+		"--summary", "manager send",
+		"--body-file", bodyFile,
+		"--quality-gate", "skip",
+		"--once",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl manager send failed: %v stderr=%s", err, stderr.String())
+	}
+	output := stdout.String()
+	for _, expected := range []string{"sent message=", "task=tc://task/manager-cli-send", "touch-connect manager", "Workers", "Timeline", "manager send"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in manager send output, got %q", expected, output)
+		}
+	}
+	snapshot := server.Snapshot()
+	if len(snapshot.Messages) != 1 || snapshot.Messages[0].Payload.Body != body {
+		t.Fatalf("expected manager send body to match file exactly, got %+v", snapshot.Messages)
 	}
 }
 
@@ -479,7 +610,7 @@ func TestTCCTLCommandHelpDoesNotRequireControl(t *testing.T) {
 	if err := tcctl.Run(context.Background(), []string{"message", "send", "-h"}, &stdout, &stderr); err != nil {
 		t.Fatalf("tcctl message send help failed: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "usage: tcctl message send") || !strings.Contains(stderr.String(), "-capability") || !strings.Contains(stderr.String(), "-quality-gate") {
+	if !strings.Contains(stderr.String(), "usage: tcctl message send") || !strings.Contains(stderr.String(), "-capability") || !strings.Contains(stderr.String(), "-quality-gate") || !strings.Contains(stderr.String(), "-body-file") {
 		t.Fatalf("expected message send help in stderr, stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 
@@ -488,8 +619,17 @@ func TestTCCTLCommandHelpDoesNotRequireControl(t *testing.T) {
 	if err := tcctl.Run(context.Background(), []string{"help", "task", "create"}, &stdout, &stderr); err != nil {
 		t.Fatalf("tcctl help task create failed: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "usage: tcctl task create") || !strings.Contains(stderr.String(), "-summary") {
+	if !strings.Contains(stderr.String(), "usage: tcctl task create") || !strings.Contains(stderr.String(), "-summary") || !strings.Contains(stderr.String(), "-body-file") {
 		t.Fatalf("expected task create help in stderr, stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := tcctl.Run(context.Background(), []string{"manager", "-h"}, &stdout, &stderr); err != nil {
+		t.Fatalf("tcctl manager help failed: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "usage: tcctl manager") || !strings.Contains(stderr.String(), "-send") || !strings.Contains(stderr.String(), "-body-file") {
+		t.Fatalf("expected manager help in stderr, stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 

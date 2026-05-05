@@ -118,6 +118,8 @@ func (r Runtime) dispatch(ctx context.Context, args []string) error {
 		return r.dlq(ctx, args[1:])
 	case "skill":
 		return r.skill(ctx, args[1:])
+	case "manager":
+		return r.manager(ctx, args[1:])
 	case "monitor":
 		return r.monitor(ctx, args[1:])
 	case "scenario":
@@ -185,6 +187,7 @@ func writeRootHelp(w io.Writer) {
 	fmt.Fprintln(w, "  approval    list, inspect, chain, approve, and reject approval records")
 	fmt.Fprintln(w, "  dlq         list and inspect dead-letter records")
 	fmt.Fprintln(w, "  skill       register, list, and inspect local AI skills")
+	fmt.Fprintln(w, "  manager     send, watch, and diagnose handoffs from one operator cockpit")
 	fmt.Fprintln(w, "  monitor     one-screen standalone operator view")
 	fmt.Fprintln(w, "  scenario    run and verify canonical scenario records")
 	fmt.Fprintln(w, "")
@@ -217,6 +220,8 @@ func (r Runtime) help(args []string) error {
 		return r.dlq(context.Background(), append([]string{"help"}, args[1:]...))
 	case "skill":
 		return r.skill(context.Background(), append([]string{"help"}, args[1:]...))
+	case "manager":
+		return r.manager(context.Background(), append(args[1:], "-h"))
 	case "monitor":
 		return r.monitor(context.Background(), append(args[1:], "-h"))
 	case "scenario":

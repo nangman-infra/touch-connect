@@ -3,8 +3,10 @@ package tcworker
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +30,45 @@ type workerSnapshotMsg struct {
 }
 
 type workerTickMsg time.Time
+
+type workerFocus int
+
+const (
+	workerFocusMessage workerFocus = iota
+	workerFocusReadback
+	workerFocusResult
+	workerFocusArtifacts
+	workerFocusEvents
+	workerFocusHelp
+)
+
+type workerLayoutMode int
+
+const (
+	workerLayoutWide workerLayoutMode = iota
+	workerLayoutStandard
+	workerLayoutCompact
+	workerLayoutTiny
+)
+
+type workerEventKind string
+
+const (
+	workerEventSystem     workerEventKind = "system"
+	workerEventEndpoint   workerEventKind = "endpoint"
+	workerEventMessage    workerEventKind = "message"
+	workerEventAttempt    workerEventKind = "attempt"
+	workerEventReadback   workerEventKind = "readback"
+	workerEventCheckpoint workerEventKind = "checkpoint"
+	workerEventArtifact   workerEventKind = "artifact"
+	workerEventError      workerEventKind = "error"
+)
+
+type workerEvent struct {
+	At      time.Time
+	Kind    workerEventKind
+	Message string
+}
 
 type workerStatusModel struct {
 	runCtx context.Context
@@ -56,7 +97,21 @@ type workerStatusModel struct {
 	seenCheckpoints   map[string]struct{}
 	seenReadbacks     map[string]struct{}
 	seenArtifacts     map[string]struct{}
-	events            []string
+	events            []workerEvent
+
+	focus             workerFocus
+	previousFocus     workerFocus
+	bodyOffset        int
+	readbackOffset    int
+	resultOffset      int
+	eventOffset       int
+	eventFilter       workerEventKind
+	artifactIndex     int
+	artifactOffset    int
+	artifactOpen      bool
+	artifactContent   string
+	artifactError     string
+	artifactContentOf string
 }
 
 func RunWorkerStatusTUI(ctx context.Context, env JoinEnvironment, run func(context.Context) error) error {
@@ -102,8 +157,9 @@ func newWorkerStatusModel(ctx context.Context, cancel context.CancelFunc, env Jo
 		seenCheckpoints: map[string]struct{}{},
 		seenReadbacks:   map[string]struct{}{},
 		seenArtifacts:   map[string]struct{}{},
+		focus:           workerFocusMessage,
 	}
-	model.addEvent("starting worker backend=" + env.Backend + " model=" + printableModel(env.Model))
+	model.addEventKind(workerEventSystem, "starting worker backend="+env.Backend+" model="+printableModel(env.Model))
 	return model
 }
 
@@ -118,16 +174,9 @@ func (m workerStatusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = item.Width
 		m.height = item.Height
 	case tea.KeyMsg:
-		switch item.String() {
-		case "ctrl+c", "q":
-			m.addEvent("stopping worker")
-			m.stopRequested = true
-			m.cancel()
-			if m.workerDone {
-				return m, tea.Quit
-			}
-		case "r":
-			commands = append(commands, m.pollSnapshotCmd())
+		cmd := m.handleKey(item)
+		if cmd != nil {
+			commands = append(commands, cmd)
 		}
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -138,19 +187,20 @@ func (m workerStatusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workerSnapshotMsg:
 		if item.err != nil {
 			m.snapshotErr = item.err
-			m.addEvent("snapshot error: " + item.err.Error())
+			m.addEventKind(workerEventError, "snapshot error: "+item.err.Error())
 			break
 		}
 		m.snapshotErr = nil
 		m.snapshot = item.snapshot
 		m.observeSnapshot(item.snapshot)
+		m.clampSelections()
 	case workerDoneMsg:
 		m.workerDone = true
 		m.workerErr = item.err
 		if item.err != nil {
-			m.addEvent("worker stopped with error: " + item.err.Error())
+			m.addEventKind(workerEventError, "worker stopped with error: "+item.err.Error())
 		} else {
-			m.addEvent("worker stopped")
+			m.addEventKind(workerEventSystem, "worker stopped")
 		}
 		if m.stopRequested {
 			return m, tea.Quit
@@ -164,35 +214,171 @@ func (m workerStatusModel) View() string {
 	endpoint, endpointOK := m.endpoint()
 	activeMessage, activeAttempt, activeOK := m.activeMessage()
 	capabilities := m.capabilitySummary(endpoint, endpointOK)
-	state := "starting"
-	if endpointOK {
-		state = endpoint.ConnectionState
+	state := m.displayState(endpoint, endpointOK, activeAttempt, activeOK)
+	mode := workerLayoutFor(width, m.height)
+	content := m.renderCockpit(mode, width, state, capabilities, endpoint, endpointOK, activeMessage, activeAttempt, activeOK)
+	if m.focus == workerFocusHelp {
+		return content + "\n" + m.helpOverlay(width)
 	}
-	if activeOK {
-		state = activeAttempt.State
+	if m.artifactOpen {
+		return content + "\n" + m.artifactViewer(width)
 	}
-	if m.workerDone {
-		state = "stopped"
-	}
-	header := workerHeaderStyle.Render("touch-connect worker") + "  " +
-		workerMutedStyle.Render("endpoint "+defaultString(m.endpointRef, "unknown")) + "\n" +
-		fmt.Sprintf("backend %-10s model %-12s server %s", m.env.Backend, printableModel(m.env.Model), m.serverURL)
-	innerWidth := maxInt(40, width-8)
-	var body string
-	if width < 100 {
-		body = strings.Join([]string{
-			m.statusPane(innerWidth, state, capabilities, endpoint, endpointOK),
-			m.messagePane(innerWidth, activeMessage, activeAttempt, activeOK),
+	return content
+}
+
+func (m workerStatusModel) renderCockpit(
+	mode workerLayoutMode,
+	width int,
+	state string,
+	capabilities string,
+	endpoint contracts.EndpointRecord,
+	endpointOK bool,
+	message contracts.MessageRecord,
+	attempt contracts.AttemptRecord,
+	activeOK bool,
+) string {
+	contentWidth := maxInt(56, width-4)
+	header := m.header(contentWidth, state)
+	task := m.taskStrip(contentWidth, message, attempt, activeOK)
+	footer := m.footer(mode)
+	switch mode {
+	case workerLayoutTiny:
+		return strings.Join([]string{
+			m.tinyHeader(contentWidth, state),
+			m.tinySummary(contentWidth, message, attempt, activeOK),
+			m.workPane(contentWidth, maxInt(6, m.height-8), message, attempt, activeOK),
+			footer,
 		}, "\n")
-	} else {
-		leftWidth := 42
-		rightWidth := maxInt(40, innerWidth-leftWidth)
-		left := m.statusPane(leftWidth, state, capabilities, endpoint, endpointOK)
-		right := m.messagePane(rightWidth, activeMessage, activeAttempt, activeOK)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	case workerLayoutCompact:
+		workHeight := maxInt(10, m.height-10)
+		return strings.Join([]string{
+			header,
+			task,
+			m.contextSummary(contentWidth, state, capabilities, endpoint, endpointOK),
+			m.workPane(contentWidth, workHeight, message, attempt, activeOK),
+			m.activitySummary(contentWidth),
+			footer,
+		}, "\n")
+	case workerLayoutStandard:
+		workHeight := clampInt(m.height-20, 10, 18)
+		bottomHeight := maxInt(8, m.height-workHeight-12)
+		gap := 1
+		leftWidth := maxInt(40, (contentWidth-gap)*48/100)
+		rightWidth := maxInt(40, contentWidth-leftWidth-gap)
+		bottom := lipgloss.JoinHorizontal(lipgloss.Top,
+			m.contextPane(leftWidth, bottomHeight, state, capabilities, endpoint, endpointOK),
+			strings.Repeat(" ", gap),
+			m.activityPane(rightWidth, bottomHeight),
+		)
+		return strings.Join([]string{
+			header,
+			task,
+			m.workPane(contentWidth, workHeight, message, attempt, activeOK),
+			bottom,
+			footer,
+		}, "\n")
+	default:
+		gap := 1
+		contextWidth := clampInt(contentWidth*30/100, 34, 46)
+		workWidth := maxInt(56, contentWidth-contextWidth-gap)
+		activityHeight := clampInt(m.height/4, 7, 10)
+		workHeight := maxInt(12, m.height-activityHeight-12)
+		top := lipgloss.JoinHorizontal(lipgloss.Top,
+			m.workPane(workWidth, workHeight, message, attempt, activeOK),
+			strings.Repeat(" ", gap),
+			m.contextPane(contextWidth, workHeight, state, capabilities, endpoint, endpointOK),
+		)
+		return strings.Join([]string{
+			header,
+			task,
+			top,
+			m.activityPane(contentWidth, activityHeight),
+			footer,
+		}, "\n")
 	}
-	events := m.eventPane(width)
-	return workerOuterStyle(width).Render(strings.Join([]string{header, body, events, workerMutedStyle.Render("q stop worker  r refresh  ? help")}, "\n"))
+}
+
+func workerLayoutFor(width int, height int) workerLayoutMode {
+	if width < 80 || height > 0 && height < 24 {
+		return workerLayoutTiny
+	}
+	if width < 100 {
+		return workerLayoutCompact
+	}
+	if width < 140 {
+		return workerLayoutStandard
+	}
+	return workerLayoutWide
+}
+
+func (m *workerStatusModel) handleKey(key tea.KeyMsg) tea.Cmd {
+	switch key.String() {
+	case "ctrl+c", "q":
+		m.addEventKind(workerEventSystem, "stopping worker")
+		m.stopRequested = true
+		m.cancel()
+		if m.workerDone {
+			return tea.Quit
+		}
+		return nil
+	case "r":
+		m.addEventKind(workerEventSystem, "manual refresh")
+		return m.pollSnapshotCmd()
+	case "?":
+		if m.focus == workerFocusHelp {
+			m.focus = m.previousFocus
+			return nil
+		}
+		m.previousFocus = m.focus
+		m.focus = workerFocusHelp
+		return nil
+	case "esc":
+		if m.artifactOpen {
+			m.artifactOpen = false
+			m.artifactContent = ""
+			m.artifactError = ""
+			return nil
+		}
+		if m.focus == workerFocusHelp {
+			m.focus = m.previousFocus
+			return nil
+		}
+	case "tab", "right":
+		if m.focus != workerFocusHelp && !m.artifactOpen {
+			m.focus = nextWorkerFocus(m.focus)
+		}
+	case "shift+tab", "backtab", "left":
+		if m.focus != workerFocusHelp && !m.artifactOpen {
+			m.focus = previousWorkerFocus(m.focus)
+		}
+	case "1":
+		m.focus = workerFocusMessage
+	case "2":
+		m.focus = workerFocusReadback
+	case "3":
+		m.focus = workerFocusResult
+	case "4":
+		m.focus = workerFocusArtifacts
+	case "5":
+		m.focus = workerFocusEvents
+	case "enter":
+		if m.focus == workerFocusArtifacts && !m.artifactOpen {
+			m.openSelectedArtifact()
+		}
+	case "up", "k":
+		m.scrollFocused(-1)
+	case "down", "j":
+		m.scrollFocused(1)
+	case "pgup":
+		m.scrollFocused(-6)
+	case "pgdown":
+		m.scrollFocused(6)
+	case "home":
+		m.scrollHome()
+	case "end":
+		m.scrollEnd()
+	}
+	return nil
 }
 
 func (m workerStatusModel) startWorkerCmd() tea.Cmd {
@@ -219,7 +405,7 @@ func (m *workerStatusModel) observeSnapshot(snapshot contracts.SnapshotResponse)
 	if endpoint, ok := findEndpoint(snapshot.Endpoints, m.endpointRef); ok {
 		if m.seenEndpointState != endpoint.ConnectionState {
 			m.seenEndpointState = endpoint.ConnectionState
-			m.addEvent("endpoint " + endpoint.ConnectionState)
+			m.addEventKind(workerEventEndpoint, "endpoint "+endpoint.ConnectionState)
 		}
 	}
 	for _, message := range snapshot.Messages {
@@ -228,7 +414,7 @@ func (m *workerStatusModel) observeSnapshot(snapshot contracts.SnapshotResponse)
 		}
 		if previous, ok := m.seenMessages[message.MessageRef]; !ok || previous != message.State {
 			m.seenMessages[message.MessageRef] = message.State
-			m.addEvent("message " + shortRef(message.MessageRef) + " " + message.State + " cap=" + message.TargetCapability)
+			m.addEventKind(workerEventMessage, "message "+shortRef(message.MessageRef)+" "+message.State+" cap="+message.TargetCapability)
 		}
 	}
 	for _, attempt := range snapshot.Attempts {
@@ -237,7 +423,7 @@ func (m *workerStatusModel) observeSnapshot(snapshot contracts.SnapshotResponse)
 		}
 		if previous, ok := m.seenAttempts[attempt.AttemptRef]; !ok || previous != attempt.State {
 			m.seenAttempts[attempt.AttemptRef] = attempt.State
-			m.addEvent("attempt " + shortRef(attempt.AttemptRef) + " " + attempt.State)
+			m.addEventKind(workerEventAttempt, "attempt "+shortRef(attempt.AttemptRef)+" "+attempt.State)
 		}
 	}
 	for _, readback := range snapshot.Readbacks {
@@ -248,7 +434,7 @@ func (m *workerStatusModel) observeSnapshot(snapshot contracts.SnapshotResponse)
 			continue
 		}
 		m.seenReadbacks[readback.ReadbackRef] = struct{}{}
-		m.addEvent("readback recorded " + shortRef(readback.ReadbackRef))
+		m.addEventKind(workerEventReadback, "readback recorded "+shortRef(readback.ReadbackRef))
 	}
 	for _, checkpoint := range snapshot.Checkpoints {
 		if checkpoint.EndpointRef != m.endpointRef {
@@ -258,7 +444,7 @@ func (m *workerStatusModel) observeSnapshot(snapshot contracts.SnapshotResponse)
 			continue
 		}
 		m.seenCheckpoints[checkpoint.CheckpointRef] = struct{}{}
-		m.addEvent("checkpoint " + checkpoint.State + " " + quoteCompact(checkpoint.Summary, 44))
+		m.addEventKind(workerEventCheckpoint, "checkpoint "+checkpoint.State+" "+quoteCompact(checkpoint.Summary, 44))
 	}
 	for _, artifact := range snapshot.Artifacts {
 		if artifact.CreatedByEndpointRef != m.endpointRef {
@@ -268,7 +454,7 @@ func (m *workerStatusModel) observeSnapshot(snapshot contracts.SnapshotResponse)
 			continue
 		}
 		m.seenArtifacts[artifact.ArtifactVersionRef] = struct{}{}
-		m.addEvent("artifact written " + shortRef(artifact.ArtifactVersionRef))
+		m.addEventKind(workerEventArtifact, "artifact written "+shortRef(artifact.ArtifactVersionRef))
 	}
 }
 
@@ -325,7 +511,342 @@ func (m workerStatusModel) capabilitySummary(endpoint contracts.EndpointRecord, 
 	return "from SKILL.md"
 }
 
-func (m workerStatusModel) statusPane(width int, state string, capabilities string, endpoint contracts.EndpointRecord, endpointOK bool) string {
+func (m workerStatusModel) displayState(endpoint contracts.EndpointRecord, endpointOK bool, attempt contracts.AttemptRecord, activeOK bool) string {
+	state := "starting"
+	if endpointOK {
+		state = endpoint.ConnectionState
+	}
+	if activeOK {
+		state = attempt.State
+	}
+	if m.workerDone {
+		state = "stopped"
+	}
+	if m.workerErr != nil {
+		state = "error"
+	}
+	if m.stopRequested && !m.workerDone {
+		state = "stopping"
+	}
+	return state
+}
+
+func (m workerStatusModel) header(width int, state string) string {
+	title := workerHeaderStyle.Render("touch-connect worker")
+	pill := renderWorkerStatePill(state)
+	right := workerMutedStyle.Render("server " + m.serverURL)
+	gap := strings.Repeat(" ", maxInt(1, width-lipgloss.Width(title)-lipgloss.Width(pill)-lipgloss.Width(right)-2))
+	meta := fmt.Sprintf("endpoint %s  backend %s  model %s  permission workspace-auto", defaultString(shortRef(m.endpointRef), "unknown"), m.env.Backend, printableModel(m.env.Model))
+	return title + " " + pill + gap + right + "\n" + workerMutedStyle.Render(compact(meta, maxInt(40, width-8)))
+}
+
+func (m workerStatusModel) taskStrip(width int, message contracts.MessageRecord, attempt contracts.AttemptRecord, ok bool) string {
+	if !ok {
+		return workerMutedStyle.Render(compact("Task idle - waiting for a message matching "+m.capabilitySummary(contracts.EndpointRecord{}, false), width))
+	}
+	taskRef := defaultString(message.CorrelationRef, "-")
+	lineOne := fmt.Sprintf("Task  %s", shortRef(taskRef))
+	lineTwo := fmt.Sprintf("Route manager -> %s   capability %s", shortRef(m.endpointRef), message.TargetCapability)
+	lineThree := fmt.Sprintf("Refs  %s · %s", shortRef(message.MessageRef), shortRef(attempt.AttemptRef))
+	if attempt.LeaseExpiresAt != "" {
+		lineThree += "   lease " + compact(attempt.LeaseExpiresAt, 28)
+	}
+	return strings.Join([]string{
+		compact(lineOne, width),
+		workerMutedStyle.Render(compact(lineTwo, width)),
+		workerMutedStyle.Render(compact(lineThree, width)),
+	}, "\n")
+}
+
+func (m workerStatusModel) tinyHeader(width int, state string) string {
+	title := "tc worker"
+	pill := strings.ToUpper(defaultString(state, "unknown"))
+	meta := fmt.Sprintf("%s %s", shortRef(m.endpointRef), printableModel(m.env.Model))
+	return compact(title+" "+pill+" "+meta, width)
+}
+
+func (m workerStatusModel) tinySummary(width int, message contracts.MessageRecord, attempt contracts.AttemptRecord, ok bool) string {
+	if !ok {
+		return workerMutedStyle.Render("idle · waiting for matching capability")
+	}
+	return strings.Join([]string{
+		compact(shortRef(defaultString(message.CorrelationRef, message.MessageRef)), width),
+		workerMutedStyle.Render(compact(shortRef(message.MessageRef)+" · "+shortRef(attempt.AttemptRef)+" · "+message.TargetCapability, width)),
+	}, "\n")
+}
+
+func (m workerStatusModel) contextSummary(width int, state string, capabilities string, endpoint contracts.EndpointRecord, endpointOK bool) string {
+	artifactCount := len(m.workerArtifacts())
+	endpointState := "not registered"
+	if endpointOK {
+		endpointState = endpoint.ConnectionState
+	}
+	line := fmt.Sprintf("Context endpoint %s · capabilities %s · artifacts %d · permission workspace-auto",
+		endpointState,
+		compact(capabilities, 30),
+		artifactCount,
+	)
+	if m.snapshotErr != nil {
+		line += " · snapshot error"
+	}
+	if m.workerErr != nil {
+		line += " · worker error"
+	}
+	_ = state
+	_ = endpoint
+	return workerMutedStyle.Render(compact(line, width))
+}
+
+func (m workerStatusModel) workPane(width int, height int, message contracts.MessageRecord, attempt contracts.AttemptRecord, ok bool) string {
+	focus := m.activeWorkFocus()
+	lines := []string{workerPaneTitle.Render("Work"), m.tabBar(width)}
+	contentHeight := maxInt(1, height-4)
+	var body []string
+	switch focus {
+	case workerFocusReadback:
+		body = m.readbackTabLines(width, contentHeight, attempt, ok)
+	case workerFocusResult:
+		body = m.resultTabLines(width, contentHeight, attempt, ok)
+	case workerFocusArtifacts:
+		body = m.artifactTabLines(width, contentHeight)
+	case workerFocusEvents:
+		body = m.logTabLines(width, contentHeight)
+	default:
+		body = m.bodyTabLines(width, contentHeight, message, ok)
+	}
+	lines = append(lines, "")
+	lines = append(lines, body...)
+	return renderWorkerPane(width, height, lines)
+}
+
+func (m workerStatusModel) contextPane(width int, height int, state string, capabilities string, endpoint contracts.EndpointRecord, endpointOK bool) string {
+	heartbeat := "not registered"
+	endpointState := "not registered"
+	if endpointOK {
+		endpointState = endpoint.ConnectionState
+		if endpoint.LastHeartbeatAt != "" {
+			heartbeat = endpoint.LastHeartbeatAt
+		}
+	}
+	processed := 0
+	failed := 0
+	for _, attempt := range m.snapshot.Attempts {
+		if attempt.EndpointRef != m.endpointRef {
+			continue
+		}
+		if attempt.State == "completed" {
+			processed++
+		}
+		if attempt.State == "failed" {
+			failed++
+		}
+	}
+	lines := []string{
+		workerPaneTitle.Render("Context"),
+		"",
+		"worker",
+		"  endpoint   " + endpointState,
+		"  heartbeat  " + compact(heartbeat, maxInt(16, width-18)),
+		"  backend    " + defaultString(m.env.Backend, "-"),
+		"  model      " + printableModel(m.env.Model),
+		"",
+		"capabilities",
+	}
+	for _, item := range splitCompactList(capabilities, maxInt(16, width-8), 4) {
+		lines = append(lines, "  "+item)
+	}
+	lines = append(lines,
+		"",
+		"run",
+		fmt.Sprintf("  processed  %d", processed),
+		fmt.Sprintf("  failed     %d", failed),
+		fmt.Sprintf("  artifacts  %d", len(m.workerArtifacts())),
+		"",
+		workerWarnStyle.Render("permission workspace-auto"),
+		workerMutedStyle.Render("trusted local workspace only"),
+	)
+	if m.snapshotErr != nil {
+		lines = append(lines, "", workerErrorStyle.Render("snapshot "+compact(m.snapshotErr.Error(), maxInt(16, width-12))))
+	}
+	if m.workerErr != nil {
+		lines = append(lines, "", workerErrorStyle.Render("worker "+compact(m.workerErr.Error(), maxInt(16, width-12))))
+	}
+	_ = state
+	return renderWorkerPane(width, height, lines)
+}
+
+func (m workerStatusModel) activityPane(width int, height int) string {
+	lines := []string{workerPaneTitle.Render("Recent Activity")}
+	events := m.filteredEvents()
+	if len(events) == 0 {
+		lines = append(lines, workerMutedStyle.Render("waiting for worker events"))
+		return renderWorkerLogPane(width, height, lines)
+	}
+	eventLines := make([]string, 0, len(events))
+	for _, event := range events {
+		eventLines = append(eventLines, m.renderEvent(event, maxInt(20, width-14)))
+	}
+	visible := paneBodyHeight(height, 2)
+	start := maxInt(0, len(eventLines)-visible-m.eventOffset)
+	view := windowLines(eventLines, start, visible)
+	lines = append(lines, view...)
+	lines = append(lines, scrollHint(len(eventLines), start, len(view)))
+	return renderWorkerLogPane(width, height, lines)
+}
+
+func (m workerStatusModel) activitySummary(width int) string {
+	events := m.filteredEvents()
+	if len(events) == 0 {
+		return workerMutedStyle.Render("Recent waiting for worker events")
+	}
+	last := events[len(events)-1]
+	return workerMutedStyle.Render(compact("Recent "+last.At.Format("15:04:05")+" "+string(last.Kind)+" "+last.Message, width))
+}
+
+func (m workerStatusModel) bodyTabLines(width int, height int, message contracts.MessageRecord, ok bool) []string {
+	if !ok {
+		return []string{
+			workerMutedStyle.Render("idle"),
+			"",
+			"This worker is registered and waiting for a matching capability.",
+			"",
+			"listening for",
+			"  " + compact(m.capabilitySummary(contracts.EndpointRecord{}, false), maxInt(20, width-8)),
+		}
+	}
+	bodyWidth := maxInt(24, width-8)
+	bodyLines := wrapText(message.Payload.Body, bodyWidth)
+	if len(bodyLines) == 0 {
+		bodyLines = []string{workerMutedStyle.Render("No payload body was provided.")}
+	}
+	view := windowLines(bodyLines, m.bodyOffset, maxInt(1, height-6))
+	lines := []string{
+		workerPaneSubtitle.Render("body"),
+	}
+	lines = append(lines, view...)
+	lines = append(lines,
+		scrollHint(len(bodyLines), m.bodyOffset, len(view)),
+		"",
+		workerMutedStyle.Render("required output: WORKER_READBACK · WORKER_ACTION · WORKER_RESULT_READY"),
+	)
+	return lines
+}
+
+func (m workerStatusModel) readbackTabLines(width int, height int, attempt contracts.AttemptRecord, ok bool) []string {
+	if !ok {
+		return []string{workerMutedStyle.Render("No message has been claimed yet.")}
+	}
+	lines := m.readbackLinesForAttempt(attempt, width)
+	view := windowLines(lines, m.readbackOffset, height)
+	result := append([]string{}, view...)
+	result = append(result, scrollHint(len(lines), m.readbackOffset, len(view)))
+	return result
+}
+
+func (m workerStatusModel) resultTabLines(width int, height int, attempt contracts.AttemptRecord, ok bool) []string {
+	if !ok {
+		return []string{workerMutedStyle.Render("No message has been claimed yet.")}
+	}
+	lines := m.checkpointLinesForAttempt(attempt, width)
+	view := windowLines(lines, m.resultOffset, height)
+	result := append([]string{}, view...)
+	result = append(result, scrollHint(len(lines), m.resultOffset, len(view)))
+	return result
+}
+
+func (m workerStatusModel) artifactTabLines(width int, height int) []string {
+	artifacts := m.workerArtifacts()
+	if len(artifacts) == 0 {
+		return []string{workerMutedStyle.Render("No artifacts written by this worker yet.")}
+	}
+	start := clampInt(m.artifactOffset, 0, maxInt(0, len(artifacts)-1))
+	end := minInt(len(artifacts), start+maxInt(1, height-2))
+	lines := make([]string, 0, end-start+2)
+	for index := start; index < end; index++ {
+		artifact := artifacts[index]
+		marker := " "
+		if index == m.artifactIndex {
+			marker = ">"
+		}
+		line := fmt.Sprintf("%s %s  %s  %s", marker, shortRef(artifact.ArtifactVersionRef), artifact.Kind, humanBytes(artifact.SizeBytes))
+		lines = append(lines, compact(line, maxInt(20, width-6)))
+	}
+	lines = append(lines, scrollHint(len(artifacts), start, end-start))
+	lines = append(lines, workerMutedStyle.Render("enter open selected artifact"))
+	return lines
+}
+
+func (m workerStatusModel) logTabLines(width int, height int) []string {
+	events := m.filteredEvents()
+	if len(events) == 0 {
+		return []string{workerMutedStyle.Render("waiting for worker events")}
+	}
+	eventLines := make([]string, 0, len(events))
+	for _, event := range events {
+		eventLines = append(eventLines, m.renderEvent(event, maxInt(20, width-14)))
+	}
+	view := windowLines(eventLines, m.eventOffset, maxInt(1, height-1))
+	lines := append([]string{}, view...)
+	lines = append(lines, scrollHint(len(eventLines), m.eventOffset, len(view)))
+	return lines
+}
+
+func (m workerStatusModel) activeWorkFocus() workerFocus {
+	if m.focus == workerFocusHelp {
+		if m.previousFocus == workerFocusHelp {
+			return workerFocusMessage
+		}
+		return m.previousFocus
+	}
+	return m.focus
+}
+
+func (m workerStatusModel) tabBar(width int) string {
+	active := m.activeWorkFocus()
+	items := []struct {
+		focus workerFocus
+		label string
+	}{
+		{workerFocusMessage, "1 Body"},
+		{workerFocusReadback, "2 Readback"},
+		{workerFocusResult, "3 Result"},
+		{workerFocusArtifacts, "4 Artifacts"},
+		{workerFocusEvents, "5 Log"},
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.focus == active {
+			parts = append(parts, workerTabActiveStyle.Render(item.label))
+			continue
+		}
+		parts = append(parts, workerTabStyle.Render(item.label))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func splitCompactList(value string, width int, limit int) []string {
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		items = append(items, compact(part, width))
+		if len(items) >= limit {
+			break
+		}
+	}
+	if len(items) == 0 {
+		return []string{"-"}
+	}
+	if len(parts) > len(items) {
+		items = append(items, compact(fmt.Sprintf("+%d more", len(parts)-len(items)), width))
+	}
+	return items
+}
+
+func (m workerStatusModel) statusPane(width int, height int, state string, capabilities string, endpoint contracts.EndpointRecord, endpointOK bool) string {
 	heartbeat := "not registered"
 	if endpointOK && endpoint.LastHeartbeatAt != "" {
 		heartbeat = endpoint.LastHeartbeatAt
@@ -352,12 +873,15 @@ func (m workerStatusModel) statusPane(width int, state string, capabilities stri
 	lines := []string{
 		workerPaneTitle.Render("Live Status"),
 		"",
-		fmt.Sprintf("state       %s %s", m.spinner.View(), state),
+		fmt.Sprintf("state       %s %s", m.spinner.View(), renderWorkerStatePill(state)),
 		fmt.Sprintf("heartbeat   %s", heartbeat),
 		fmt.Sprintf("capabilities %s", compact(capabilities, 32)),
 		fmt.Sprintf("processed   %d", processed),
 		fmt.Sprintf("failed      %d", failed),
 		fmt.Sprintf("artifacts   %d", artifacts),
+		"",
+		workerWarnStyle.Render("permission   auto-approve"),
+		workerMutedStyle.Render("trusted local workspace only"),
 	}
 	if m.snapshotErr != nil {
 		lines = append(lines, "", workerWarnStyle.Render("snapshot error: "+compact(m.snapshotErr.Error(), 42)))
@@ -365,26 +889,40 @@ func (m workerStatusModel) statusPane(width int, state string, capabilities stri
 	if m.workerErr != nil {
 		lines = append(lines, "", workerErrorStyle.Render("worker error: "+compact(m.workerErr.Error(), 42)))
 	}
-	return workerPaneStyle.Width(width).Render(strings.Join(lines, "\n"))
+	return renderWorkerPane(width, height, lines)
 }
 
-func (m workerStatusModel) messagePane(width int, message contracts.MessageRecord, attempt contracts.AttemptRecord, ok bool) string {
-	lines := []string{workerPaneTitle.Render("Current Message"), ""}
+func (m workerStatusModel) messagePane(width int, height int, message contracts.MessageRecord, attempt contracts.AttemptRecord, ok bool) string {
+	lines := []string{m.paneTitle("Current Message", workerFocusMessage), ""}
 	if !ok {
 		lines = append(lines,
-			"no active message",
+			workerMutedStyle.Render("idle"),
 			"",
-			"Waiting for capability:",
-			"  "+m.capabilitySummary(contracts.EndpointRecord{}, false),
+			"This worker is registered and waiting for a matching capability.",
+			"",
+			"listening for",
+			"  "+compact(m.capabilitySummary(contracts.EndpointRecord{}, false), maxInt(20, width-8)),
 		)
-		return workerPaneStyle.Width(width).Render(strings.Join(lines, "\n"))
+		return renderWorkerPane(width, height, lines)
 	}
+	bodyWidth := maxInt(24, width-8)
+	bodyLines := wrapText(message.Payload.Body, bodyWidth)
+	if len(bodyLines) == 0 {
+		bodyLines = []string{workerMutedStyle.Render("No payload body was provided.")}
+	}
+	bodyView := windowLines(bodyLines, m.bodyOffset, 8)
 	lines = append(lines,
 		fmt.Sprintf("message  %s", message.MessageRef),
 		fmt.Sprintf("attempt  %s", attempt.AttemptRef),
 		fmt.Sprintf("task     %s", defaultString(message.CorrelationRef, "-")),
 		fmt.Sprintf("state    %s", message.State),
-		fmt.Sprintf("summary  %s", compact(message.Payload.Summary, 38)),
+		fmt.Sprintf("summary  %s", compact(message.Payload.Summary, maxInt(20, width-18))),
+		"",
+		workerPaneSubtitle.Render("body"),
+	)
+	lines = append(lines, bodyView...)
+	lines = append(lines,
+		scrollHint(len(bodyLines), m.bodyOffset, len(bodyView)),
 		"",
 		"required output",
 		"  WORKER_READBACK",
@@ -394,27 +932,530 @@ func (m workerStatusModel) messagePane(width int, message contracts.MessageRecor
 	if attempt.LeaseExpiresAt != "" {
 		lines = append(lines, "", "lease expires "+attempt.LeaseExpiresAt)
 	}
-	return workerPaneStyle.Width(width).Render(strings.Join(lines, "\n"))
+	return renderWorkerPane(width, height, lines)
 }
 
-func (m workerStatusModel) eventPane(width int) string {
-	events := m.events
-	if len(events) > 10 {
-		events = events[len(events)-10:]
+func (m workerStatusModel) resultPane(width int, height int, attempt contracts.AttemptRecord, ok bool) string {
+	lines := []string{m.paneTitle("Result", workerFocusResult), ""}
+	if !ok {
+		lines = append(lines, workerMutedStyle.Render("No message has been claimed yet."))
+		return renderWorkerPane(width, height, lines)
 	}
-	lines := []string{workerPaneTitle.Render("Event Log")}
-	lines = append(lines, events...)
+	resultLines := m.resultLinesForAttempt(attempt, width)
+	view := windowLines(resultLines, m.resultOffset, paneBodyHeight(height, 2))
+	lines = append(lines, view...)
+	lines = append(lines, scrollHint(len(resultLines), m.resultOffset, len(view)))
+	return renderWorkerPane(width, height, lines)
+}
+
+func (m workerStatusModel) artifactPane(width int, height int) string {
+	lines := []string{m.paneTitle("Artifacts", workerFocusArtifacts), ""}
+	artifacts := m.workerArtifacts()
+	if len(artifacts) == 0 {
+		lines = append(lines, workerMutedStyle.Render("No artifacts written by this worker yet."))
+		return renderWorkerPane(width, height, lines)
+	}
+	start := clampInt(m.artifactOffset, 0, maxInt(0, len(artifacts)-1))
+	visible := paneBodyHeight(height, 5)
+	end := minInt(len(artifacts), start+visible)
+	for index := start; index < end; index++ {
+		artifact := artifacts[index]
+		marker := " "
+		if index == m.artifactIndex {
+			marker = ">"
+		}
+		line := fmt.Sprintf("%s %s  %s  %s", marker, shortRef(artifact.ArtifactVersionRef), artifact.Kind, humanBytes(artifact.SizeBytes))
+		lines = append(lines, compact(line, maxInt(20, width-6)))
+	}
+	lines = append(lines, scrollHint(len(artifacts), start, end-start))
+	lines = append(lines, workerMutedStyle.Render("enter open artifact"))
+	return renderWorkerPane(width, height, lines)
+}
+
+func (m workerStatusModel) eventPane(width int, height int) string {
+	events := m.filteredEvents()
+	lines := []string{m.paneTitle("Event Log", workerFocusEvents)}
+	lines = append(lines, workerMutedStyle.Render("filter "+m.eventFilterLabel()+"   1 all  2 msg  3 attempt  4 readback  5 checkpoint  6 artifact  7 error"))
 	if len(events) == 0 {
 		lines = append(lines, "waiting for worker events")
+		return renderWorkerLogPane(width, height, lines)
 	}
-	return workerLogStyle.Width(maxInt(40, width-8)).Render(strings.Join(lines, "\n"))
+	eventLines := make([]string, 0, len(events))
+	for _, event := range events {
+		eventLines = append(eventLines, m.renderEvent(event, maxInt(20, width-14)))
+	}
+	view := windowLines(eventLines, m.eventOffset, paneBodyHeight(height, 3))
+	lines = append(lines, view...)
+	lines = append(lines, scrollHint(len(eventLines), m.eventOffset, len(view)))
+	return renderWorkerLogPane(width, height, lines)
 }
 
-func (m *workerStatusModel) addEvent(message string) {
-	m.events = append(m.events, time.Now().Format("15:04:05")+"  "+message)
+func (m *workerStatusModel) addEventKind(kind workerEventKind, message string) {
+	m.events = append(m.events, workerEvent{At: time.Now(), Kind: kind, Message: message})
 	if len(m.events) > 200 {
 		m.events = m.events[len(m.events)-200:]
 	}
+}
+
+func (m *workerStatusModel) setEventFilter(kind workerEventKind) {
+	m.eventFilter = kind
+	m.eventOffset = 0
+	m.focus = workerFocusEvents
+}
+
+func (m workerStatusModel) eventFilterLabel() string {
+	if m.eventFilter == "" {
+		return "all"
+	}
+	return string(m.eventFilter)
+}
+
+func (m workerStatusModel) filteredEvents() []workerEvent {
+	if m.eventFilter == "" {
+		return m.events
+	}
+	result := make([]workerEvent, 0, len(m.events))
+	for _, event := range m.events {
+		if event.Kind == m.eventFilter {
+			result = append(result, event)
+		}
+	}
+	return result
+}
+
+func (m workerStatusModel) renderEvent(event workerEvent, width int) string {
+	kind := string(event.Kind)
+	style := workerMutedStyle
+	switch event.Kind {
+	case workerEventError:
+		style = workerErrorStyle
+	case workerEventArtifact:
+		style = workerSuccessStyle
+	case workerEventCheckpoint, workerEventReadback:
+		style = workerInfoStyle
+	}
+	prefix := style.Render(fmt.Sprintf("%-10s", kind))
+	return event.At.Format("15:04:05") + "  " + prefix + " " + compact(event.Message, width)
+}
+
+func (m workerStatusModel) paneTitle(title string, focus workerFocus) string {
+	if m.focus == focus {
+		return workerPaneTitle.Render("● " + title)
+	}
+	return workerPaneTitle.Render(title)
+}
+
+func (m workerStatusModel) footer(mode workerLayoutMode) string {
+	if mode == workerLayoutTiny {
+		return workerMutedStyle.Render("1 body  3 result  ? help  q stop")
+	}
+	return workerMutedStyle.Render("1 body  2 readback  3 result  4 artifacts  5 log   tab switch  j/k scroll  enter open  ? help  q stop")
+}
+
+func nextWorkerFocus(focus workerFocus) workerFocus {
+	switch focus {
+	case workerFocusMessage:
+		return workerFocusReadback
+	case workerFocusReadback:
+		return workerFocusResult
+	case workerFocusResult:
+		return workerFocusArtifacts
+	case workerFocusArtifacts:
+		return workerFocusEvents
+	default:
+		return workerFocusMessage
+	}
+}
+
+func previousWorkerFocus(focus workerFocus) workerFocus {
+	switch focus {
+	case workerFocusEvents:
+		return workerFocusArtifacts
+	case workerFocusArtifacts:
+		return workerFocusResult
+	case workerFocusResult:
+		return workerFocusReadback
+	case workerFocusReadback:
+		return workerFocusMessage
+	default:
+		return workerFocusEvents
+	}
+}
+
+func (m *workerStatusModel) scrollFocused(delta int) {
+	if m.artifactOpen {
+		m.artifactOffset = clampInt(m.artifactOffset+delta, 0, m.maxArtifactViewerOffset())
+		return
+	}
+	switch m.focus {
+	case workerFocusMessage:
+		m.bodyOffset = clampInt(m.bodyOffset+delta, 0, m.maxBodyOffset())
+	case workerFocusReadback:
+		m.readbackOffset = clampInt(m.readbackOffset+delta, 0, m.maxReadbackOffset())
+	case workerFocusResult:
+		m.resultOffset = clampInt(m.resultOffset+delta, 0, m.maxResultOffset())
+	case workerFocusEvents:
+		m.eventOffset = clampInt(m.eventOffset+delta, 0, m.maxEventOffset())
+	case workerFocusArtifacts:
+		artifacts := m.workerArtifacts()
+		if len(artifacts) == 0 {
+			m.artifactIndex = 0
+			m.artifactOffset = 0
+			return
+		}
+		m.artifactIndex = clampInt(m.artifactIndex+delta, 0, len(artifacts)-1)
+		if m.artifactIndex < m.artifactOffset {
+			m.artifactOffset = m.artifactIndex
+		}
+		if m.artifactIndex >= m.artifactOffset+6 {
+			m.artifactOffset = m.artifactIndex - 5
+		}
+	}
+}
+
+func (m *workerStatusModel) scrollHome() {
+	if m.artifactOpen {
+		m.artifactOffset = 0
+		return
+	}
+	switch m.focus {
+	case workerFocusMessage:
+		m.bodyOffset = 0
+	case workerFocusReadback:
+		m.readbackOffset = 0
+	case workerFocusResult:
+		m.resultOffset = 0
+	case workerFocusEvents:
+		m.eventOffset = 0
+	case workerFocusArtifacts:
+		m.artifactIndex = 0
+		m.artifactOffset = 0
+	}
+}
+
+func (m *workerStatusModel) scrollEnd() {
+	if m.artifactOpen {
+		m.artifactOffset = m.maxArtifactViewerOffset()
+		return
+	}
+	switch m.focus {
+	case workerFocusMessage:
+		m.bodyOffset = m.maxBodyOffset()
+	case workerFocusReadback:
+		m.readbackOffset = m.maxReadbackOffset()
+	case workerFocusResult:
+		m.resultOffset = m.maxResultOffset()
+	case workerFocusEvents:
+		m.eventOffset = m.maxEventOffset()
+	case workerFocusArtifacts:
+		artifacts := m.workerArtifacts()
+		if len(artifacts) > 0 {
+			m.artifactIndex = len(artifacts) - 1
+			m.artifactOffset = maxInt(0, len(artifacts)-6)
+		}
+	}
+}
+
+func (m workerStatusModel) maxBodyOffset() int {
+	message, _, ok := m.activeMessage()
+	if !ok {
+		return 0
+	}
+	width := maxInt(24, tuiWidth(m.width, 100)-16)
+	return maxInt(0, len(wrapText(message.Payload.Body, width))-8)
+}
+
+func (m workerStatusModel) maxReadbackOffset() int {
+	_, attempt, ok := m.activeMessage()
+	if !ok {
+		return 0
+	}
+	return maxInt(0, len(m.readbackLinesForAttempt(attempt, tuiWidth(m.width, 100)))-10)
+}
+
+func (m workerStatusModel) maxResultOffset() int {
+	_, attempt, ok := m.activeMessage()
+	if !ok {
+		return 0
+	}
+	return maxInt(0, len(m.checkpointLinesForAttempt(attempt, tuiWidth(m.width, 100)))-10)
+}
+
+func (m workerStatusModel) maxEventOffset() int {
+	return maxInt(0, len(m.filteredEvents())-10)
+}
+
+func (m workerStatusModel) maxArtifactViewerOffset() int {
+	if m.artifactError != "" {
+		return 0
+	}
+	height := maxInt(8, m.height/3)
+	return maxInt(0, len(wrapText(m.artifactContent, maxInt(40, tuiWidth(m.width, 100)-12)))-height)
+}
+
+func (m *workerStatusModel) clampSelections() {
+	artifacts := m.workerArtifacts()
+	if len(artifacts) == 0 {
+		m.artifactIndex = 0
+		m.artifactOffset = 0
+		return
+	}
+	m.artifactIndex = clampInt(m.artifactIndex, 0, len(artifacts)-1)
+	m.artifactOffset = clampInt(m.artifactOffset, 0, len(artifacts)-1)
+}
+
+func (m workerStatusModel) latestReadback(attemptRef string) (contracts.ReadbackRecord, bool) {
+	var latest contracts.ReadbackRecord
+	ok := false
+	for _, readback := range m.snapshot.Readbacks {
+		if readback.AttemptRef != attemptRef || readback.EndpointRef != m.endpointRef {
+			continue
+		}
+		if !ok || readback.Revision > latest.Revision || readback.ReadbackRef > latest.ReadbackRef {
+			latest = readback
+			ok = true
+		}
+	}
+	return latest, ok
+}
+
+func (m workerStatusModel) latestCheckpoint(attemptRef string) (contracts.CheckpointRecord, bool) {
+	var latest contracts.CheckpointRecord
+	ok := false
+	for _, checkpoint := range m.snapshot.Checkpoints {
+		if checkpoint.AttemptRef != attemptRef || checkpoint.EndpointRef != m.endpointRef {
+			continue
+		}
+		if !ok || checkpoint.Revision > latest.Revision || checkpoint.CheckpointRef > latest.CheckpointRef {
+			latest = checkpoint
+			ok = true
+		}
+	}
+	return latest, ok
+}
+
+func (m workerStatusModel) readbackLinesForAttempt(attempt contracts.AttemptRecord, width int) []string {
+	readback, ok := m.latestReadback(attempt.AttemptRef)
+	if !ok {
+		return []string{workerMutedStyle.Render("No readback recorded yet.")}
+	}
+	lines := []string{
+		workerPaneSubtitle.Render("readback"),
+	}
+	understanding := wrapText(readback.Understanding, maxInt(24, width-8))
+	if len(understanding) == 0 {
+		understanding = []string{workerMutedStyle.Render("No understanding text was recorded.")}
+	}
+	lines = append(lines, understanding...)
+	if len(readback.Questions) > 0 {
+		lines = append(lines, "", "questions")
+		for _, question := range readback.Questions {
+			lines = append(lines, "  - "+compact(question, maxInt(20, width-10)))
+		}
+	}
+	lines = append(lines,
+		"",
+		workerMutedStyle.Render("ref "+shortRef(readback.ReadbackRef)),
+	)
+	return lines
+}
+
+func (m workerStatusModel) checkpointLinesForAttempt(attempt contracts.AttemptRecord, width int) []string {
+	checkpoint, ok := m.latestCheckpoint(attempt.AttemptRef)
+	if !ok {
+		return []string{workerMutedStyle.Render("No checkpoint result has been recorded yet.")}
+	}
+	lines := []string{
+		workerPaneSubtitle.Render("result"),
+		"state   " + checkpoint.State,
+	}
+	summary := wrapText("summary "+checkpoint.Summary, maxInt(24, width-8))
+	lines = append(lines, summary...)
+	if len(checkpoint.MissingFields) > 0 {
+		lines = append(lines, "missing fields "+strings.Join(checkpoint.MissingFields, ", "))
+	}
+	if len(checkpoint.MissingReasons) > 0 {
+		lines = append(lines, "missing reasons")
+		for _, reason := range checkpoint.MissingReasons {
+			lines = append(lines, "  - "+compact(reason, maxInt(20, width-10)))
+		}
+	}
+	if len(checkpoint.ArtifactRefs) > 0 {
+		lines = append(lines, "", "artifacts")
+		for _, ref := range checkpoint.ArtifactRefs {
+			lines = append(lines, "  "+shortRef(ref))
+		}
+	}
+	lines = append(lines,
+		"",
+		workerMutedStyle.Render("checkpoint "+shortRef(checkpoint.CheckpointRef)),
+	)
+	return lines
+}
+
+func (m workerStatusModel) resultLinesForAttempt(attempt contracts.AttemptRecord, width int) []string {
+	readback, hasReadback := m.latestReadback(attempt.AttemptRef)
+	checkpoint, hasCheckpoint := m.latestCheckpoint(attempt.AttemptRef)
+	resultLines := make([]string, 0)
+	if hasReadback {
+		resultLines = append(resultLines,
+			workerPaneSubtitle.Render("readback"),
+			"understanding "+compact(readback.Understanding, maxInt(20, width-30)),
+		)
+		if len(readback.Questions) > 0 {
+			resultLines = append(resultLines, "questions")
+			for _, question := range readback.Questions {
+				resultLines = append(resultLines, "  - "+compact(question, maxInt(20, width-24)))
+			}
+		}
+	} else {
+		resultLines = append(resultLines, workerMutedStyle.Render("No readback recorded yet."))
+	}
+	if hasCheckpoint {
+		if len(resultLines) > 0 {
+			resultLines = append(resultLines, "")
+		}
+		resultLines = append(resultLines,
+			workerPaneSubtitle.Render("checkpoint"),
+			"state   "+checkpoint.State,
+			"summary "+compact(checkpoint.Summary, maxInt(20, width-28)),
+		)
+		if len(checkpoint.MissingFields) > 0 {
+			resultLines = append(resultLines, "missing fields "+strings.Join(checkpoint.MissingFields, ", "))
+		}
+		if len(checkpoint.MissingReasons) > 0 {
+			resultLines = append(resultLines, "missing reasons")
+			for _, reason := range checkpoint.MissingReasons {
+				resultLines = append(resultLines, "  - "+compact(reason, maxInt(20, width-24)))
+			}
+		}
+		if len(checkpoint.ArtifactRefs) > 0 {
+			resultLines = append(resultLines, "artifacts "+strings.Join(checkpoint.ArtifactRefs, ", "))
+		}
+	}
+	if len(resultLines) == 0 {
+		resultLines = append(resultLines, workerMutedStyle.Render("No worker result has been recorded yet."))
+	}
+	return resultLines
+}
+
+func (m workerStatusModel) workerArtifacts() []contracts.ArtifactRecord {
+	artifacts := make([]contracts.ArtifactRecord, 0)
+	for _, artifact := range m.snapshot.Artifacts {
+		if artifact.CreatedByEndpointRef == m.endpointRef {
+			artifacts = append(artifacts, artifact)
+		}
+	}
+	sort.SliceStable(artifacts, func(i, j int) bool {
+		return artifacts[i].ArtifactVersionRef > artifacts[j].ArtifactVersionRef
+	})
+	return artifacts
+}
+
+func (m *workerStatusModel) openSelectedArtifact() {
+	artifacts := m.workerArtifacts()
+	if len(artifacts) == 0 {
+		return
+	}
+	m.artifactIndex = clampInt(m.artifactIndex, 0, len(artifacts)-1)
+	artifact := artifacts[m.artifactIndex]
+	m.artifactOpen = true
+	m.artifactOffset = 0
+	m.artifactContentOf = artifact.ArtifactVersionRef
+	content, err := readArtifactPreview(artifact)
+	if err != nil {
+		m.artifactContent = ""
+		m.artifactError = err.Error()
+		m.addEventKind(workerEventError, "artifact open failed "+shortRef(artifact.ArtifactVersionRef)+": "+err.Error())
+		return
+	}
+	m.artifactContent = content
+	m.artifactError = ""
+	m.addEventKind(workerEventArtifact, "artifact opened "+shortRef(artifact.ArtifactVersionRef))
+}
+
+func (m workerStatusModel) artifactViewer(width int) string {
+	title := "Artifact Viewer"
+	lines := []string{workerPaneTitle.Render(title), ""}
+	if m.artifactError != "" {
+		lines = append(lines, workerErrorStyle.Render(m.artifactError))
+	} else {
+		lines = append(lines, "artifact "+m.artifactContentOf, "")
+		contentLines := wrapText(m.artifactContent, maxInt(40, width-12))
+		view := windowLines(contentLines, m.artifactOffset, maxInt(8, m.height/3))
+		lines = append(lines, view...)
+		lines = append(lines, scrollHint(len(contentLines), m.artifactOffset, len(view)))
+	}
+	lines = append(lines, "", workerMutedStyle.Render("esc close  j/k scroll  q stop worker"))
+	return workerModalStyle(width).Render(strings.Join(lines, "\n"))
+}
+
+func (m workerStatusModel) helpOverlay(width int) string {
+	lines := []string{
+		workerPaneTitle.Render("Worker Console Help"),
+		"",
+		"navigation",
+		"  1..5               switch Body, Readback, Result, Artifacts, Log",
+		"  tab / shift+tab    cycle worker tabs",
+		"  j/k or arrows      scroll the active tab",
+		"  home/end           jump to top or bottom",
+		"",
+		"actions",
+		"  enter              open the selected artifact",
+		"  r                  refresh snapshot now",
+		"  ? / esc            close this help",
+		"  q / ctrl+c         stop worker",
+		"",
+		"worker contract",
+		"  WORKER_READBACK",
+		"  WORKER_ACTION",
+		"  WORKER_RESULT_READY",
+	}
+	return workerModalStyle(width).Render(strings.Join(lines, "\n"))
+}
+
+func readArtifactPreview(artifact contracts.ArtifactRecord) (string, error) {
+	if !strings.HasPrefix(artifact.MediaType, "text/") && artifact.MediaType != "application/json" {
+		return strings.Join([]string{
+			"binary or non-inline artifact",
+			"kind       " + artifact.Kind,
+			"media_type " + artifact.MediaType,
+			"size       " + humanBytes(artifact.SizeBytes),
+			"storage    " + artifact.StorageRef,
+		}, "\n"), nil
+	}
+	path, err := artifactFilePath(artifact.StorageRef)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	const limit = 256 * 1024
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > limit {
+		return string(data[:limit]) + "\n\n[truncated at 256 KiB]", nil
+	}
+	return string(data), nil
+}
+
+func artifactFilePath(storageRef string) (string, error) {
+	if !strings.HasPrefix(storageRef, "file://") {
+		return "", fmt.Errorf("artifact storage is not a local file: %s", storageRef)
+	}
+	value := strings.TrimPrefix(storageRef, "file://")
+	if decoded, err := url.PathUnescape(value); err == nil {
+		value = decoded
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("artifact storage path is empty")
+	}
+	return value, nil
 }
 
 func findEndpoint(items []contracts.EndpointRecord, endpointRef string) (contracts.EndpointRecord, bool) {
@@ -473,6 +1514,82 @@ func compact(value string, maxWidth int) string {
 	return string(runes[:maxWidth-3]) + "..."
 }
 
+func wrapText(value string, width int) []string {
+	width = maxInt(12, width)
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	var lines []string
+	for _, raw := range strings.Split(value, "\n") {
+		if raw == "" {
+			lines = append(lines, "")
+			continue
+		}
+		runes := []rune(raw)
+		for len(runes) > width {
+			lines = append(lines, string(runes[:width]))
+			runes = runes[width:]
+		}
+		lines = append(lines, string(runes))
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func windowLines(lines []string, offset int, height int) []string {
+	if height <= 0 || len(lines) == 0 {
+		return nil
+	}
+	if len(lines) <= height {
+		return lines
+	}
+	maxOffset := len(lines) - height
+	offset = clampInt(offset, 0, maxOffset)
+	return lines[offset : offset+height]
+}
+
+func scrollHint(total int, offset int, visible int) string {
+	if total <= 0 {
+		return workerMutedStyle.Render("showing 0")
+	}
+	if visible <= 0 || total <= visible {
+		return workerMutedStyle.Render(fmt.Sprintf("showing %d", total))
+	}
+	maxOffset := maxInt(0, total-visible)
+	offset = clampInt(offset, 0, maxOffset)
+	return workerMutedStyle.Render(fmt.Sprintf("showing %d-%d of %d", offset+1, minInt(total, offset+visible), total))
+}
+
+func minInt(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func clampInt(value int, low int, high int) int {
+	if high < low {
+		return low
+	}
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
+}
+
+func humanBytes(size int64) string {
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	}
+	if size < 1024*1024 {
+		return fmt.Sprintf("%.1f KiB", float64(size)/1024)
+	}
+	return fmt.Sprintf("%.1f MiB", float64(size)/(1024*1024))
+}
+
 func quoteCompact(value string, maxWidth int) string {
 	value = compact(value, maxWidth)
 	if value == "" {
@@ -482,16 +1599,54 @@ func quoteCompact(value string, maxWidth int) string {
 }
 
 var (
-	workerOuterBorder = lipgloss.Color("62")
-	workerPaneBorder  = lipgloss.Color("238")
-	workerHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-	workerMutedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	workerPaneTitle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
-	workerWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	workerErrorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	workerPaneStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(workerPaneBorder).Padding(1, 2)
-	workerLogStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(workerPaneBorder).Padding(1, 2)
+	workerOuterBorder    = lipgloss.Color("62")
+	workerPaneBorder     = lipgloss.Color("238")
+	workerHeaderStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
+	workerMutedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	workerPaneTitle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
+	workerPaneSubtitle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
+	workerTabStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	workerTabActiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("24")).
+				Bold(true).
+				Padding(0, 1)
+	workerInfoStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	workerSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	workerWarnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	workerErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	workerPaneStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(workerPaneBorder).Padding(1, 2)
+	workerLogStyle     = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(workerPaneBorder).Padding(1, 2)
 )
+
+func renderWorkerStatePill(state string) string {
+	label := strings.ToUpper(defaultString(state, "unknown"))
+	bg := lipgloss.Color("238")
+	fg := lipgloss.Color("250")
+	switch state {
+	case "online", "available", "completed":
+		bg = lipgloss.Color("29")
+		fg = lipgloss.Color("15")
+	case "claimed", "in_progress", "takeover_candidate":
+		bg = lipgloss.Color("25")
+		fg = lipgloss.Color("15")
+	case "starting", "stopping":
+		bg = lipgloss.Color("136")
+		fg = lipgloss.Color("15")
+	case "failed", "dead_lettered", "error":
+		bg = lipgloss.Color("124")
+		fg = lipgloss.Color("15")
+	case "stopped", "offline", "stale":
+		bg = lipgloss.Color("238")
+		fg = lipgloss.Color("250")
+	}
+	return lipgloss.NewStyle().
+		Foreground(fg).
+		Background(bg).
+		Bold(true).
+		Padding(0, 1).
+		Render(label)
+}
 
 func workerOuterStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().
@@ -499,4 +1654,39 @@ func workerOuterStyle(width int) lipgloss.Style {
 		BorderForeground(workerOuterBorder).
 		Padding(1, 2).
 		Width(maxInt(40, width-2))
+}
+
+func renderWorkerPane(width int, height int, lines []string) string {
+	return workerPaneStyle.
+		Width(maxInt(24, width-6)).
+		Render(strings.Join(fitLines(lines, maxInt(4, height)), "\n"))
+}
+
+func renderWorkerLogPane(width int, height int, lines []string) string {
+	return workerLogStyle.
+		Width(maxInt(32, width-6)).
+		Render(strings.Join(fitLines(lines, maxInt(4, height)), "\n"))
+}
+
+func paneBodyHeight(paneHeight int, reservedLines int) int {
+	return maxInt(1, paneHeight-reservedLines)
+}
+
+func fitLines(lines []string, height int) []string {
+	result := append([]string(nil), lines...)
+	if len(result) > height {
+		return result[:height]
+	}
+	for len(result) < height {
+		result = append(result, "")
+	}
+	return result
+}
+
+func workerModalStyle(width int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("86")).
+		Padding(1, 2).
+		Width(maxInt(40, width-6))
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
 	"github.com/nangman-infra/touch-connect/tcctl/internal/output"
@@ -49,11 +50,12 @@ func (r Runtime) message(ctx context.Context, args []string) error {
 }
 
 func (r Runtime) sendMessage(ctx context.Context, args []string) error {
-	flags := commandFlagSet("message send --capability CAP --summary TEXT --body TEXT [flags]", r.stderr)
+	flags := commandFlagSet("message send --capability CAP --summary TEXT (--body TEXT|--body-file PATH) [flags]", r.stderr)
 	sender := flags.String("sender", "tc://endpoint/tcctl", "sender endpoint ref")
 	capability := flags.String("capability", "", "target capability")
 	summary := flags.String("summary", "", "payload summary")
 	body := flags.String("body", "", "payload body")
+	bodyFile := flags.String("body-file", "", "read payload body from file")
 	taskRef := flags.String("task", "", "task/correlation ref")
 	messageRef := flags.String("message-ref", "", "optional message ref")
 	readbackRequired := flags.Bool("readback-required", false, "require worker readback")
@@ -66,9 +68,14 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 	if err != nil {
 		return usageError(err)
 	}
-	if *capability == "" || *summary == "" || *body == "" {
+	resolvedBody, err := resolvePayloadBody(*body, *bodyFile)
+	if err != nil {
 		flags.Usage()
-		return usageError(fmt.Errorf("--capability, --summary, and --body are required"))
+		return usageError(err)
+	}
+	if *capability == "" || *summary == "" || resolvedBody == "" {
+		flags.Usage()
+		return usageError(fmt.Errorf("--capability, --summary, and one of --body or --body-file are required"))
 	}
 	req := contracts.MessageIngressRequest{
 		MessageRef:        *messageRef,
@@ -80,7 +87,7 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 		Constraints:       []contracts.Constraint{},
 		Payload: contracts.Payload{
 			Summary:    *summary,
-			Body:       *body,
+			Body:       resolvedBody,
 			References: []contracts.Reference{},
 		},
 	}
@@ -173,30 +180,37 @@ func (r Runtime) task(ctx context.Context, args []string) error {
 
 func (r Runtime) createTask(ctx context.Context, args []string) error {
 	if helpOnly(args) {
-		flags := commandFlagSet("task create <task_ref> --capability CAP --summary TEXT --body TEXT [flags]", r.stderr)
+		flags := commandFlagSet("task create <task_ref> --capability CAP --summary TEXT (--body TEXT|--body-file PATH) [flags]", r.stderr)
 		flags.String("sender", "tc://endpoint/tcctl", "sender endpoint ref")
 		flags.String("capability", "", "target capability")
 		flags.String("summary", "", "payload summary")
 		flags.String("body", "", "payload body")
+		flags.String("body-file", "", "read payload body from file")
 		flags.Bool("readback-required", true, "require worker readback")
 		flags.Usage()
 		return errHelpRequested
 	}
-	if err := requireArgs(args, 1, "tcctl task create <task_ref> --capability CAP --summary TEXT --body TEXT"); err != nil {
+	if err := requireArgs(args, 1, "tcctl task create <task_ref> --capability CAP --summary TEXT (--body TEXT|--body-file PATH)"); err != nil {
 		return err
 	}
-	flags := commandFlagSet("task create <task_ref> --capability CAP --summary TEXT --body TEXT [flags]", r.stderr)
+	flags := commandFlagSet("task create <task_ref> --capability CAP --summary TEXT (--body TEXT|--body-file PATH) [flags]", r.stderr)
 	sender := flags.String("sender", "tc://endpoint/tcctl", "sender endpoint ref")
 	capability := flags.String("capability", "", "target capability")
 	summary := flags.String("summary", "", "payload summary")
 	body := flags.String("body", "", "payload body")
+	bodyFile := flags.String("body-file", "", "read payload body from file")
 	readbackRequired := flags.Bool("readback-required", true, "require worker readback")
 	if err := parseCommandFlags(flags, args[1:]); err != nil {
 		return err
 	}
-	if *capability == "" || *summary == "" || *body == "" {
+	resolvedBody, err := resolvePayloadBody(*body, *bodyFile)
+	if err != nil {
 		flags.Usage()
-		return usageError(fmt.Errorf("--capability, --summary, and --body are required"))
+		return usageError(err)
+	}
+	if *capability == "" || *summary == "" || resolvedBody == "" {
+		flags.Usage()
+		return usageError(fmt.Errorf("--capability, --summary, and one of --body or --body-file are required"))
 	}
 	value, err := r.client.SendMessage(ctx, contracts.MessageIngressRequest{
 		SenderEndpointRef: *sender,
@@ -206,7 +220,7 @@ func (r Runtime) createTask(ctx context.Context, args []string) error {
 		Constraints:       []contracts.Constraint{},
 		Payload: contracts.Payload{
 			Summary:    *summary,
-			Body:       *body,
+			Body:       resolvedBody,
 			References: []contracts.Reference{},
 		},
 	})
@@ -243,6 +257,20 @@ func (r Runtime) taskCommand(ctx context.Context, args []string, action string) 
 	}
 	fmt.Fprintf(r.stdout, "%s\t%s\tmessages=%d\tattempts=%d\n", value.TaskRef, value.State, value.AffectedMessages, value.AffectedAttempts)
 	return nil
+}
+
+func resolvePayloadBody(body string, bodyFile string) (string, error) {
+	if body != "" && bodyFile != "" {
+		return "", fmt.Errorf("--body and --body-file cannot be used together")
+	}
+	if bodyFile == "" {
+		return body, nil
+	}
+	data, err := os.ReadFile(bodyFile)
+	if err != nil {
+		return "", fmt.Errorf("read --body-file: %w", err)
+	}
+	return string(data), nil
 }
 
 func writeMessageHelp(w io.Writer) {

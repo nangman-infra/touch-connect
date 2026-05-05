@@ -96,7 +96,19 @@ Preferred local AI worker startup:
 make worker
 ```
 
-The worker TUI detects `claude`, `codex`, `gemini`, and `kiro-cli` on `PATH`, shows ready/missing status, and lets the user choose the backend and model. After join, it stays open as the worker console and shows endpoint state, current message, readback/checkpoint/artifact events, and completion state.
+The worker TUI detects `claude`, `codex`, `gemini`, and `kiro-cli` on `PATH`, shows ready/missing status, and lets the user choose the backend and model. After join, it stays open as the worker cockpit: a responsive `Work` surface with `Body`, `Readback`, `Result`, `Artifacts`, and `Log` tabs, plus compact worker context and recent activity.
+
+Worker console keys:
+
+```text
+1..5             switch Body, Readback, Result, Artifacts, and Log tabs
+tab / shift+tab  cycle worker tabs
+j/k or arrows    scroll the active tab
+enter            open the selected artifact
+r                refresh snapshot now
+?                show help
+q                stop the worker
+```
 
 Use `--plain` for scripts or terminal debugging:
 

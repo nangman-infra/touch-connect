@@ -76,8 +76,11 @@ Override the default task or capability without changing files:
 
 ```sh
 make send-demo TASK_REF=tc://task/readme_review CAPABILITY=code.change
+make manager-watch TASK_REF=tc://task/readme_review
 make message-tail CAPABILITY=ai.review
 ```
+
+`make send-demo` reads its payload from `examples/messages/dev-demo-body.md` by default, so multi-line handoff prompts do not depend on shell quoting. Override it with `DEMO_BODY_FILE=/absolute/path/to/body.md`.
 
 To run the smoke-test echo worker explicitly:
 
@@ -91,7 +94,7 @@ Local AI CLI workers remain host-side by default because Codex, Claude Code, Gem
 make worker
 ```
 
-It opens the worker TUI, detects installed AI CLIs, marks what is ready or missing, lets the user choose the backend/model, then starts `tc-worker join`. After join, the same TUI shows endpoint state, advertised capabilities, current message, readback/checkpoint/artifact events, and completion state. For Claude Max users, the default selection is Claude Code with `opus[1m]`.
+It opens the worker TUI, detects installed AI CLIs, marks what is ready or missing, lets the user choose the backend/model, then starts `tc-worker join`. After join, the same TUI becomes the worker cockpit: a responsive `Work` surface with `Body`, `Readback`, `Result`, `Artifacts`, and `Log` tabs, a compact context rail, recent activity, and help overlay. For Claude Max users, the default selection is Claude Code with `opus[1m]`.
 
 Use plain text mode when testing scripts or debugging a terminal issue:
 
@@ -148,7 +151,7 @@ Detected AI CLIs:
 
 After selection, the worker stays in the foreground and waits. It should not run `tcctl message send`, `tcctl task watch`, or `tcctl task history` to verify itself. Those commands belong to the manager terminal.
 
-The foreground worker screen is expected to stay open. When no message is active it shows `waiting`; when a matching message is delivered it changes through claim, checkpoint, artifact, and completion events. Press `q` to stop the worker.
+The foreground worker screen is expected to stay open. When no message is active it shows `waiting`; when a matching message is delivered it changes through claim, readback, checkpoint, artifact, and completion activity. Use `1` through `5` to switch `Body`, `Readback`, `Result`, `Artifacts`, and `Log`; press `enter` to open a selected artifact; press `q` only when the manager wants the worker to stop.
 
 Direct Claude command:
 
@@ -175,23 +178,22 @@ Supported backend presets are `claude`, `codex`, `gemini`, and `kiro`. `--model`
 
 ### Manager Terminal
 
-Watch the live flow first:
+Use the manager cockpit as the primary operator surface:
 
 ```sh
 cd /absolute/path/to/touch-connect
-make monitor
-make message-tail
+make manager
 ```
 
-In another manager terminal, send the task:
+Send the task, then watch the same task in the manager cockpit:
 
 ```sh
 cd /absolute/path/to/touch-connect
 
 TASK_REF=tc://task/local_ai_handoff_demo
 
-make send-demo TASK_REF="$TASK_REF" DEMO_BODY="Role split: the sender is the manager/operator and the receiver is the worker AI. Inspect the current standalone compose + watch/tail flow. Return WORKER_READBACK, WORKER_ACTION, and WORKER_RESULT_READY. Do not modify files."
-make watch-demo TASK_REF="$TASK_REF"
+make send-demo TASK_REF="$TASK_REF"
+make manager-watch TASK_REF="$TASK_REF"
 make history-demo TASK_REF="$TASK_REF"
 ```
 

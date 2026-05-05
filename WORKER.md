@@ -66,9 +66,9 @@ go run ./tc-worker/cmd/tc-worker join \
   --capabilities code.change
 ```
 
-After this command starts, the worker should stay in the foreground and wait. Seeing no worker chat output is normal. The manager verifies endpoint registration from another terminal.
+After this command starts, the worker should stay in the foreground and wait. The worker cockpit is the worker's live UI: it shows the state pill once, the active task route and refs, a `Work` surface with `Body`, `Readback`, `Result`, `Artifacts`, and `Log` tabs, compact worker context, recent activity, and a help overlay. Seeing no backend chat output is normal because the result must be captured as a touch-connect artifact, not just printed in the chat UI.
 
-The worker screen itself should show whether it is waiting, claimed a message, submitted readback/checkpoints, wrote an artifact, or completed. Press `q` only when the manager wants the worker to stop.
+The worker screen itself should show whether it is waiting, claimed a message, submitted readback/checkpoints, wrote an artifact, or completed. Use `1` through `5` to switch worker tabs, `tab` to cycle tabs, `j/k` or arrows to scroll, `enter` to open an artifact, `?` for help, and press `q` only when the manager wants the worker to stop.
 
 Use plain text fallback only for scripts or terminal debugging:
 

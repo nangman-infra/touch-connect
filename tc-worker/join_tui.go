@@ -321,7 +321,8 @@ func (m joinWizardTUIModel) confirmScreen(_ int) string {
 		fmt.Sprintf("  skills        %s", skills),
 		"  permission    non-interactive auto-approve",
 		"",
-		"WARNING: auto-approve prevents local permission prompts. Use only in a trusted workspace.",
+		"SECURITY: this worker runs without local permission prompts.",
+		"Only start it inside a trusted workspace and stop it when the handoff is done.",
 		"",
 		"Press enter to start worker.",
 	}, "\n")
@@ -330,7 +331,7 @@ func (m joinWizardTUIModel) confirmScreen(_ int) string {
 func (m joinWizardTUIModel) footer(_ int) string {
 	switch m.screen {
 	case joinWizardScreenBackend:
-		return joinMutedStyle.Render("up/down select  enter continue  r refresh  q quit")
+		return joinMutedStyle.Render("up/down select  enter continue  q quit")
 	case joinWizardScreenModel:
 		return joinMutedStyle.Render("up/down select  enter continue  esc back  q quit")
 	case joinWizardScreenCustomModel:

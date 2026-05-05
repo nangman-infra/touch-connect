@@ -18,7 +18,7 @@ func (r Runtime) message(ctx context.Context, args []string) error {
 	if args[0] == "help" {
 		return r.messageCommandHelp(args[1:])
 	}
-	if err := requireArgs(args, 1, "tcctl message <send|list|inspect|history>"); err != nil {
+	if err := requireArgs(args, 1, "tcctl message <send|list|inspect|history|tail>"); err != nil {
 		return err
 	}
 	switch args[0] {
@@ -40,6 +40,8 @@ func (r Runtime) message(ctx context.Context, args []string) error {
 		output.WriteMessage(r.stdout, value)
 	case "history":
 		return r.listMessages(ctx, args[1:])
+	case "tail":
+		return r.tailMessages(ctx, args[1:])
 	default:
 		return usageError(fmt.Errorf("unknown message command %q", args[0]))
 	}
@@ -134,7 +136,7 @@ func (r Runtime) task(ctx context.Context, args []string) error {
 	if args[0] == "help" {
 		return r.taskCommandHelp(args[1:])
 	}
-	if err := requireArgs(args, 1, "tcctl task <create|status|history|cancel|retry>"); err != nil {
+	if err := requireArgs(args, 1, "tcctl task <create|status|history|watch|cancel|retry>"); err != nil {
 		return err
 	}
 	switch args[0] {
@@ -158,6 +160,8 @@ func (r Runtime) task(ctx context.Context, args []string) error {
 			return unavailableError(err)
 		}
 		return output.WriteJSON(r.stdout, value)
+	case "watch":
+		return r.watchTask(ctx, args[1:])
 	case "cancel":
 		return r.taskCommand(ctx, args[1:], "cancel")
 	case "retry":
@@ -242,13 +246,14 @@ func (r Runtime) taskCommand(ctx context.Context, args []string, action string) 
 }
 
 func writeMessageHelp(w io.Writer) {
-	fmt.Fprintln(w, "usage: tcctl message <send|list|inspect|history>")
+	fmt.Fprintln(w, "usage: tcctl message <send|list|inspect|history|tail>")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  send      create a message handoff")
 	fmt.Fprintln(w, "  list      list messages, optionally filtered by task")
 	fmt.Fprintln(w, "  inspect   inspect one message")
 	fmt.Fprintln(w, "  history   alias for list")
+	fmt.Fprintln(w, "  tail      stream message, attempt, checkpoint, readback, and artifact changes")
 }
 
 func (r Runtime) messageCommandHelp(args []string) error {
@@ -264,18 +269,21 @@ func (r Runtime) messageCommandHelp(args []string) error {
 	case "inspect":
 		fmt.Fprintln(r.stdout, "usage: tcctl message inspect <message_ref>")
 		return nil
+	case "tail":
+		return r.tailMessages(context.Background(), []string{"-h"})
 	default:
 		return usageError(fmt.Errorf("unknown message command %q", args[0]))
 	}
 }
 
 func writeTaskHelp(w io.Writer) {
-	fmt.Fprintln(w, "usage: tcctl task <create|status|history|cancel|retry>")
+	fmt.Fprintln(w, "usage: tcctl task <create|status|history|watch|cancel|retry>")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  create <task_ref>   create the initial task handoff")
 	fmt.Fprintln(w, "  status <task_ref>   show task projection")
 	fmt.Fprintln(w, "  history <task_ref>  show task messages, attempts, and artifacts")
+	fmt.Fprintln(w, "  watch <task_ref>    stream task message, attempt, checkpoint, readback, and artifact changes")
 	fmt.Fprintln(w, "  cancel <task_ref>   cancel task messages")
 	fmt.Fprintln(w, "  retry <task_ref>    explicitly retry task messages")
 }
@@ -292,6 +300,8 @@ func (r Runtime) taskCommandHelp(args []string) error {
 		fmt.Fprintln(r.stdout, "usage: tcctl task status <task_ref>")
 	case "history":
 		fmt.Fprintln(r.stdout, "usage: tcctl task history <task_ref>")
+	case "watch":
+		return r.watchTask(context.Background(), append(args[1:], "-h"))
 	case "cancel":
 		fmt.Fprintln(r.stdout, "usage: tcctl task cancel <task_ref>")
 	case "retry":

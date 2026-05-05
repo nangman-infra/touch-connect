@@ -189,6 +189,32 @@ echo "reviewer saw prior implementer output"
 	}
 }
 
+func TestAICLIExecutorCanPassPromptAsArgument(t *testing.T) {
+	command := writeFakeAIScript(t, `#!/bin/sh
+set -eu
+input="$*"
+case "$input" in
+  *"message_ref: tc://message/msg_ai"*payload.body:*) echo "AI CLI received prompt argument";;
+  *) echo "missing prompt argument context" >&2; exit 17;;
+esac
+`)
+	executor, err := tcworker.NewAICLIExecutor(tcworker.AICLIExecutorOptions{
+		Command: command,
+		Args:    []string{"{{prompt}}"},
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("create AI CLI executor: %v", err)
+	}
+	result, err := executor.Execute(context.Background(), llmExecutionInput())
+	if err != nil {
+		t.Fatalf("execute AI CLI: %v", err)
+	}
+	if result.Outcome != tcworker.ExecutionOutcomeCompleted || !strings.Contains(result.Stdout, "prompt argument") {
+		t.Fatalf("expected prompt argument execution, got %+v", result)
+	}
+}
+
 func TestWorkerEnvSelectsAICLIExecutor(t *testing.T) {
 	command := writeFakeAIScript(t, `#!/bin/sh
 cat >/dev/null

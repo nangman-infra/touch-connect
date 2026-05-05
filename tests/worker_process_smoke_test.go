@@ -301,7 +301,11 @@ Read the handoff, verify intent preservation, and produce an auditable review.
 	aiCLIPath := filepath.Join(t.TempDir(), "fake-ai-cli.sh")
 	if err := os.WriteFile(aiCLIPath, []byte(`#!/bin/sh
 set -eu
-input=$(cat)
+if [ "$#" -gt 0 ]; then
+  input="$*"
+else
+  input=$(cat)
+fi
 printf '%s' "$input" | grep -q "tc://skill/ai-review" || { echo "missing skill guidance" >&2; exit 9; }
 printf '%s' "$input" | grep -q "Original message body" || { echo "missing original message body" >&2; exit 10; }
 echo "skill AI CLI reviewed handoff"
@@ -331,20 +335,23 @@ echo "skill AI CLI reviewed handoff"
 	workerCtx, workerCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer workerCancel()
 	workerOutput := new(bytes.Buffer)
-	workerCmd := exec.CommandContext(workerCtx, "go", "run", "./tc-worker/cmd/tc-worker")
+	workerCmd := exec.CommandContext(workerCtx, "go", "run", "./tc-worker/cmd/tc-worker", "join",
+		"--server-url", serverURL,
+		"--backend", "codex",
+		"--command", aiCLIPath,
+		"--args", "{{prompt}}",
+		"--skill", skillPath,
+		"--endpoint-ref", "tc://endpoint/ai_cli_join_worker",
+		"--capabilities", "ai.review",
+		"--max-messages", "1",
+		"--poll-interval", "20ms",
+		"--heartbeat-interval", "50ms",
+		"--timeout", "2s",
+		"--artifact-dir", filepath.Join(t.TempDir(), "artifacts"),
+	)
 	workerCmd.Dir = root
 	workerCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	workerCmd.Env = append(os.Environ(),
-		"TC_WORKER_SERVER_URL="+serverURL,
-		"TC_WORKER_MAX_MESSAGES=1",
-		"TC_WORKER_POLL_INTERVAL=20ms",
-		"TC_WORKER_HEARTBEAT_INTERVAL=50ms",
-		"TC_WORKER_EXECUTOR=skill",
-		"TC_WORKER_SKILL_BACKEND=ai-cli",
-		"TC_WORKER_SKILLS_DIR="+skillsDir,
-		"TC_WORKER_AI_CLI_COMMAND="+aiCLIPath,
-		"TC_WORKER_AI_CLI_TIMEOUT=2s",
-	)
+	workerCmd.Env = os.Environ()
 	workerCmd.Stdout = workerOutput
 	workerCmd.Stderr = workerOutput
 	if err := workerCmd.Start(); err != nil {

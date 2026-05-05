@@ -118,6 +118,8 @@ func (r Runtime) dispatch(ctx context.Context, args []string) error {
 		return r.dlq(ctx, args[1:])
 	case "skill":
 		return r.skill(ctx, args[1:])
+	case "monitor":
+		return r.monitor(ctx, args[1:])
 	case "scenario":
 		return r.scenario(ctx, args[1:])
 	case "-h", "--help":
@@ -172,17 +174,18 @@ func commandError(err error) error {
 }
 
 func writeRootHelp(w io.Writer) {
-	fmt.Fprintln(w, "usage: tcctl [--control-url URL] [--timeout DURATION] [--json] <group> <command>")
+	fmt.Fprintln(w, "usage: tcctl [--control-url URL] [--timeout DURATION] [--json] <group|command> [command]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "groups:")
 	fmt.Fprintln(w, "  server      health and version")
 	fmt.Fprintln(w, "  endpoint    endpoint list, inspect, capabilities")
-	fmt.Fprintln(w, "  message     send, list, inspect, history")
-	fmt.Fprintln(w, "  task        status and history by task/correlation ref")
+	fmt.Fprintln(w, "  message     send, list, inspect, history, and tail")
+	fmt.Fprintln(w, "  task        status, history, and watch by task/correlation ref")
 	fmt.Fprintln(w, "  artifact    list, inspect, lineage, and finalize artifact versions")
 	fmt.Fprintln(w, "  approval    list, inspect, chain, approve, and reject approval records")
 	fmt.Fprintln(w, "  dlq         list and inspect dead-letter records")
 	fmt.Fprintln(w, "  skill       register, list, and inspect local AI skills")
+	fmt.Fprintln(w, "  monitor     one-screen standalone operator view")
 	fmt.Fprintln(w, "  scenario    run and verify canonical scenario records")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "use \"tcctl help <group>\" or \"tcctl <group> <command> -h\" for command help")
@@ -214,6 +217,8 @@ func (r Runtime) help(args []string) error {
 		return r.dlq(context.Background(), append([]string{"help"}, args[1:]...))
 	case "skill":
 		return r.skill(context.Background(), append([]string{"help"}, args[1:]...))
+	case "monitor":
+		return r.monitor(context.Background(), append(args[1:], "-h"))
 	case "scenario":
 		return r.scenario(context.Background(), append([]string{"help"}, args[1:]...))
 	default:

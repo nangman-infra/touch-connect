@@ -1,0 +1,316 @@
+package tcworker
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const (
+	BackendAuto   = "auto"
+	BackendClaude = "claude"
+	BackendCodex  = "codex"
+	BackendGemini = "gemini"
+	BackendKiro   = "kiro"
+)
+
+type JoinOptions struct {
+	ServerURL         string
+	Backend           string
+	Model             string
+	Command           string
+	Args              []string
+	EndpointRef       string
+	DisplayName       string
+	ActorID           string
+	WorkspaceID       string
+	Capabilities      string
+	SkillsDir         string
+	SkillPaths        []string
+	WorkDir           string
+	ArtifactDir       string
+	Timeout           time.Duration
+	PollInterval      time.Duration
+	HeartbeatInterval time.Duration
+	MaxMessages       int
+	Sandbox           string
+}
+
+type JoinEnvironment struct {
+	Backend string
+	Model   string
+	Command string
+	Args    []string
+	Env     map[string]string
+}
+
+type backendPreset struct {
+	Backend      string
+	Command      string
+	DefaultModel string
+	DisplayName  string
+	BuildArgs    func(model string, sandbox string) []string
+}
+
+func BuildJoinEnvironment(options JoinOptions) (JoinEnvironment, error) {
+	accepted, err := options.withDefaults()
+	if err != nil {
+		return JoinEnvironment{}, err
+	}
+	preset, err := presetForBackend(accepted.Backend)
+	if err != nil {
+		return JoinEnvironment{}, err
+	}
+	command := strings.TrimSpace(accepted.Command)
+	if command == "" {
+		command, err = exec.LookPath(preset.Command)
+		if err != nil {
+			return JoinEnvironment{}, fmt.Errorf("%s backend requires %q on PATH; pass --command to override", preset.Backend, preset.Command)
+		}
+	}
+	args := append([]string(nil), accepted.Args...)
+	model := strings.TrimSpace(accepted.Model)
+	if model == "" {
+		model = preset.DefaultModel
+	}
+	if len(args) == 0 {
+		args = preset.BuildArgs(model, accepted.Sandbox)
+	}
+	env := map[string]string{
+		"TC_WORKER_SERVER_URL":         accepted.ServerURL,
+		"TC_WORKER_ENDPOINT_REF":       accepted.EndpointRef,
+		"TC_WORKER_DISPLAY_NAME":       accepted.DisplayName,
+		"TC_WORKER_ACTOR_ID":           accepted.ActorID,
+		"TC_WORKER_WORKSPACE_ID":       accepted.WorkspaceID,
+		"TC_WORKER_BACKEND":            preset.Backend,
+		"TC_WORKER_MODEL":              model,
+		"TC_WORKER_EXECUTOR":           "skill",
+		"TC_WORKER_SKILL_BACKEND":      "ai-cli",
+		"TC_WORKER_AI_CLI_COMMAND":     command,
+		"TC_WORKER_AI_CLI_ARGS":        strings.Join(args, ","),
+		"TC_WORKER_AI_CLI_WORKDIR":     accepted.WorkDir,
+		"TC_WORKER_ARTIFACT_DIR":       accepted.ArtifactDir,
+		"TC_WORKER_AI_CLI_TIMEOUT":     accepted.Timeout.String(),
+		"TC_WORKER_POLL_INTERVAL":      accepted.PollInterval.String(),
+		"TC_WORKER_HEARTBEAT_INTERVAL": accepted.HeartbeatInterval.String(),
+	}
+	if accepted.Capabilities != "" {
+		env["TC_WORKER_CAPABILITIES"] = accepted.Capabilities
+	}
+	if accepted.SkillsDir != "" {
+		env["TC_WORKER_SKILLS_DIR"] = accepted.SkillsDir
+	}
+	if len(accepted.SkillPaths) > 0 {
+		env["TC_WORKER_SKILL_PATHS"] = strings.Join(accepted.SkillPaths, ",")
+	}
+	if accepted.MaxMessages > 0 {
+		env["TC_WORKER_MAX_MESSAGES"] = fmt.Sprintf("%d", accepted.MaxMessages)
+	}
+	return JoinEnvironment{Backend: preset.Backend, Model: model, Command: command, Args: args, Env: env}, nil
+}
+
+func (o JoinOptions) withDefaults() (JoinOptions, error) {
+	if strings.TrimSpace(o.ServerURL) == "" {
+		o.ServerURL = "http://127.0.0.1:8080"
+	}
+	o.Backend = strings.ToLower(strings.TrimSpace(o.Backend))
+	if o.Backend == "" {
+		o.Backend = BackendAuto
+	}
+	if o.Backend == BackendAuto {
+		selected, err := detectBackend()
+		if err != nil {
+			return JoinOptions{}, err
+		}
+		o.Backend = selected
+	}
+	if o.WorkDir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return JoinOptions{}, err
+		}
+		o.WorkDir = wd
+	}
+	workDir, err := filepath.Abs(o.WorkDir)
+	if err != nil {
+		return JoinOptions{}, err
+	}
+	o.WorkDir = workDir
+	if o.SkillsDir == "" && len(o.SkillPaths) == 0 {
+		defaultSkillsDir := filepath.Join(o.WorkDir, "examples", "skills")
+		if _, err := os.Stat(defaultSkillsDir); err == nil {
+			o.SkillsDir = defaultSkillsDir
+		}
+	}
+	if o.SkillsDir != "" {
+		o.SkillsDir, err = filepath.Abs(o.SkillsDir)
+		if err != nil {
+			return JoinOptions{}, err
+		}
+	}
+	for index, path := range o.SkillPaths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return JoinOptions{}, err
+		}
+		o.SkillPaths[index] = absolute
+	}
+	if o.SkillsDir == "" && len(o.SkillPaths) == 0 {
+		return JoinOptions{}, errors.New("worker join requires --skills-dir or --skill")
+	}
+	if o.ArtifactDir == "" {
+		o.ArtifactDir = filepath.Join(o.WorkDir, ".touch-connect", "workers", safeJoinPart(o.Backend), "artifacts")
+	}
+	o.ArtifactDir, err = filepath.Abs(o.ArtifactDir)
+	if err != nil {
+		return JoinOptions{}, err
+	}
+	if o.EndpointRef == "" {
+		o.EndpointRef = "tc://endpoint/" + safeJoinPart(o.Backend) + "_worker"
+	}
+	if o.DisplayName == "" {
+		o.DisplayName = joinTitle(o.Backend) + " worker"
+	}
+	if o.ActorID == "" {
+		o.ActorID = "actor." + safeJoinPart(o.Backend) + "-worker"
+	}
+	if o.WorkspaceID == "" {
+		o.WorkspaceID = "workspace.local"
+	}
+	if o.Timeout == 0 {
+		o.Timeout = 10 * time.Minute
+	}
+	if o.Timeout < 0 {
+		return JoinOptions{}, errors.New("--timeout must not be negative")
+	}
+	if o.PollInterval == 0 {
+		o.PollInterval = 500 * time.Millisecond
+	}
+	if o.PollInterval < 0 {
+		return JoinOptions{}, errors.New("--poll-interval must not be negative")
+	}
+	if o.HeartbeatInterval == 0 {
+		o.HeartbeatInterval = 5 * time.Second
+	}
+	if o.HeartbeatInterval < 0 {
+		return JoinOptions{}, errors.New("--heartbeat-interval must not be negative")
+	}
+	if o.Sandbox == "" {
+		o.Sandbox = "read-only"
+	}
+	return o, nil
+}
+
+func detectBackend() (string, error) {
+	for _, candidate := range []string{BackendClaude, BackendCodex, BackendGemini, BackendKiro} {
+		preset, _ := presetForBackend(candidate)
+		if _, err := exec.LookPath(preset.Command); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("no supported AI CLI found on PATH; pass --backend and --command")
+}
+
+func presetForBackend(backend string) (backendPreset, error) {
+	switch backend {
+	case BackendClaude:
+		return backendPreset{
+			Backend:      BackendClaude,
+			Command:      "claude",
+			DefaultModel: "",
+			DisplayName:  "Claude",
+			BuildArgs: func(model string, _ string) []string {
+				args := []string{"-p"}
+				if model != "" {
+					args = append(args, "--model", model)
+				}
+				return args
+			},
+		}, nil
+	case BackendCodex:
+		return backendPreset{
+			Backend:      BackendCodex,
+			Command:      "codex",
+			DefaultModel: "",
+			DisplayName:  "Codex",
+			BuildArgs: func(model string, sandbox string) []string {
+				args := []string{"exec", "--skip-git-repo-check", "--sandbox", sandbox, "-c", "approval_policy=\"never\""}
+				if model != "" {
+					args = append(args, "-m", model)
+				}
+				return append(args, "-")
+			},
+		}, nil
+	case BackendGemini:
+		return backendPreset{
+			Backend:      BackendGemini,
+			Command:      "gemini",
+			DefaultModel: "",
+			DisplayName:  "Gemini",
+			BuildArgs: func(model string, _ string) []string {
+				args := []string{"-p", "{{prompt}}"}
+				if model != "" {
+					args = append([]string{"--model", model}, args...)
+				}
+				return args
+			},
+		}, nil
+	case BackendKiro:
+		return backendPreset{
+			Backend:      BackendKiro,
+			Command:      "kiro-cli",
+			DefaultModel: "",
+			DisplayName:  "Kiro",
+			BuildArgs: func(model string, _ string) []string {
+				args := []string{"chat", "--no-interactive"}
+				if model != "" {
+					args = append(args, "--model", model)
+				}
+				return append(args, "{{prompt}}")
+			},
+		}, nil
+	default:
+		return backendPreset{}, fmt.Errorf("unknown worker backend %q", backend)
+	}
+}
+
+func safeJoinPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, item := range value {
+		if item >= 'a' && item <= 'z' || item >= '0' && item <= '9' {
+			builder.WriteRune(item)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			builder.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	result := strings.Trim(builder.String(), "_")
+	if result == "" {
+		return "ai"
+	}
+	return result
+}
+
+func joinTitle(value string) string {
+	switch value {
+	case BackendClaude:
+		return "Claude"
+	case BackendCodex:
+		return "Codex"
+	case BackendGemini:
+		return "Gemini"
+	case BackendKiro:
+		return "Kiro"
+	default:
+		return "AI"
+	}
+}

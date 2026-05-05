@@ -124,6 +124,12 @@ func ConfigFromEnv() Config {
 			config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "skill_guided")
 		}
 	}
+	if backend := strings.TrimSpace(os.Getenv("TC_WORKER_BACKEND")); backend != "" {
+		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "backend:"+backend)
+	}
+	if model := strings.TrimSpace(os.Getenv("TC_WORKER_MODEL")); model != "" {
+		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "model:"+model)
+	}
 	return config
 }
 
@@ -417,6 +423,13 @@ func skillCapabilitiesFromEnv() ([]contracts.Capability, error) {
 
 func skillsFromEnv() ([]contracts.SkillDefinition, error) {
 	var loaded []contracts.SkillDefinition
+	for _, path := range splitCSV(os.Getenv("TC_WORKER_SKILL_PATHS")) {
+		skill, err := skillpkg.LoadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		loaded = append(loaded, skill)
+	}
 	if registryPath := skillRegistryPathFromEnv(); registryPath != "" {
 		registry, err := skillpkg.LoadRegistry(registryPath)
 		if err != nil {

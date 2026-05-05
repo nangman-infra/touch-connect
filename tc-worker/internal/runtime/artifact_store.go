@@ -101,6 +101,9 @@ func (s *LocalArtifactStore) taskRefFor(input ExecutionInput) string {
 	if s.taskRef != "" {
 		return s.taskRef
 	}
+	if input.CorrelationRef != "" {
+		return input.CorrelationRef
+	}
 	return "tc://task/execution_" + shortDigest(input.MessageRef)
 }
 

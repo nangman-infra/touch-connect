@@ -4,3 +4,4 @@ docs/
 
 # Local assistant/workflow state.
 .claude/
+.touch-connect/

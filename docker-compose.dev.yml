@@ -1,4 +1,74 @@
 services:
+  tc-server:
+    build:
+      context: .
+    image: touch-connect:dev
+    command:
+      - tc-server
+    environment:
+      TC_SERVER_BIND_ADDR: 0.0.0.0:8080
+      TC_SERVER_STORAGE: sqlite
+      TC_SERVER_SQLITE_PATH: /data/touch-connect.db
+    ports:
+      - "${TC_SERVER_PORT:-8080}:8080"
+    volumes:
+      - touch-connect-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  tc-control:
+    image: touch-connect:dev
+    command:
+      - tc-control
+    depends_on:
+      tc-server:
+        condition: service_healthy
+    environment:
+      TC_CONTROL_BIND_ADDR: 0.0.0.0:8081
+      TC_CONTROL_SERVER_URL: http://tc-server:8080
+    ports:
+      - "${TC_CONTROL_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/readyz"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  tc-worker-echo:
+    image: touch-connect:dev
+    command:
+      - tc-worker
+    depends_on:
+      tc-server:
+        condition: service_healthy
+    environment:
+      TC_WORKER_SERVER_URL: http://tc-server:8080
+      TC_WORKER_ENDPOINT_REF: tc://endpoint/compose_echo_worker
+      TC_WORKER_DISPLAY_NAME: Compose echo worker
+      TC_WORKER_ACTOR_ID: actor.compose-echo
+      TC_WORKER_WORKSPACE_ID: workspace.compose
+      TC_WORKER_EXECUTOR: echo
+      TC_WORKER_ARTIFACT_DIR: /artifacts
+      TC_WORKER_POLL_INTERVAL: 500ms
+      TC_WORKER_HEARTBEAT_INTERVAL: 5s
+    volumes:
+      - touch-connect-artifacts:/artifacts
+
+  tcctl:
+    image: touch-connect:dev
+    profiles:
+      - tools
+    entrypoint:
+      - tcctl
+    depends_on:
+      tc-control:
+        condition: service_healthy
+    environment:
+      TCCTL_CONTROL_URL: http://tc-control:8081
+
   nats:
     image: nats:2.12.7-alpine
     command:
@@ -14,4 +84,6 @@ services:
       - nats-jetstream:/data
 
 volumes:
+  touch-connect-data:
+  touch-connect-artifacts:
   nats-jetstream:

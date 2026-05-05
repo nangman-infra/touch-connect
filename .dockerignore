@@ -1,0 +1,14 @@
+.git
+.gitignore
+.claude
+docs
+**/docs
+tmp
+dist
+build
+coverage
+node_modules
+*.log
+*.db
+*.sqlite
+*.sqlite3

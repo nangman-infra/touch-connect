@@ -147,6 +147,89 @@ func TestTCCTLListsEndpointsAndSendsMessageThroughControl(t *testing.T) {
 	}
 }
 
+func TestTCCTLWatchAndTailExposeLiveFlow(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	serverHTTP := httptest.NewServer(server.Handler())
+	defer serverHTTP.Close()
+	worker := tcworker.NewHTTPRuntime(serverHTTP.URL, serverHTTP.Client(), tcworker.DefaultConfig())
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	control, err := tccontrol.New(serverHTTP.URL, serverHTTP.Client(), "test-control")
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+	controlHTTP := httptest.NewServer(control.Handler())
+	defer controlHTTP.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"message", "send",
+		"--capability", "code.change",
+		"--summary", "watch flow",
+		"--body", "message for watch flow",
+		"--task", "tc://task/watch-flow",
+		"--quality-gate", "skip",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl message send failed: %v stderr=%s", err, stderr.String())
+	}
+	if _, err := worker.ProcessNext(context.Background()); err != nil {
+		t.Fatalf("process message: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"task", "watch", "tc://task/watch-flow",
+		"--once",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl task watch failed: %v stderr=%s", err, stderr.String())
+	}
+	watchOutput := stdout.String()
+	for _, expected := range []string{"message ref=", "attempt ref=", "checkpoint ref=", "state=completed"} {
+		if !strings.Contains(watchOutput, expected) {
+			t.Fatalf("expected %q in task watch output, got %q", expected, watchOutput)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"message", "tail",
+		"--capability", "code.change",
+		"--once",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl message tail failed: %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "cap=code.change") || !strings.Contains(stdout.String(), "state=completed") {
+		t.Fatalf("expected message tail to include completed code.change flow, got %q", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = tcctl.Run(context.Background(), []string{
+		"--control-url", controlHTTP.URL,
+		"monitor",
+		"--once",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tcctl monitor failed: %v stderr=%s", err, stderr.String())
+	}
+	monitorOutput := stdout.String()
+	for _, expected := range []string{"touch-connect monitor", "workers online=1", "messages total=1", "tasks total=1", "quality total=", "artifacts total="} {
+		if !strings.Contains(monitorOutput, expected) {
+			t.Fatalf("expected %q in monitor output, got %q", expected, monitorOutput)
+		}
+	}
+}
+
 func TestTCCTLSkillRegisterListInspectUsesLocalRegistry(t *testing.T) {
 	dir := t.TempDir()
 	skillPath := filepath.Join(dir, "review-skill", "SKILL.md")

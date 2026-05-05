@@ -29,6 +29,7 @@ tcctl endpoint capabilities
 tcctl task create <task_ref> --capability <name> --summary <text> --body <text>
 tcctl task status <task_ref>
 tcctl task history <task_ref>
+tcctl task watch <task_ref> [--interval 1s]
 tcctl task cancel <task_ref>
 tcctl task retry <task_ref>
 
@@ -36,6 +37,7 @@ tcctl message send --capability <name> --summary <text> --body <text> [--task <t
 tcctl message list [--task <task_ref>]
 tcctl message inspect <message_ref>
 tcctl message history [--task <task_ref>]
+tcctl message tail [--task <task_ref>] [--capability <cap>] [--interval 1s]
 
 tcctl artifact list [--task <task_ref>]
 tcctl artifact inspect <artifact_version_ref>
@@ -53,6 +55,8 @@ tcctl dlq replay <dead_letter_ref>
 tcctl skill register /absolute/path/to/SKILL.md
 tcctl skill list
 tcctl skill inspect <skill_ref_or_name>
+
+tcctl monitor [--interval 1s] [--once]
 
 tcctl scenario run canonical [--task <task_ref>] [--wait=true] [--wait-timeout 10s]
 tcctl scenario verify canonical [--task <task_ref>]
@@ -81,6 +85,24 @@ Use command help without a running control plane:
 tcctl help message
 tcctl message send -h
 tcctl task create -h
+```
+
+## Live Watch
+
+`message tail` and `task watch` are polling-based operator views for local standalone runs. They print one line for each new or changed message, attempt, checkpoint, readback, and artifact:
+
+```text
+tcctl message tail --capability ai.review
+tcctl task watch tc://task/live_ai_tikitaka
+```
+
+Use `--once` in scripts or tests to print the current matching state and exit.
+
+`monitor` is the standalone operator entrypoint. It prints workers, message states, tasks, quality decisions, and recent artifacts in one frame:
+
+```text
+tcctl monitor --once
+tcctl monitor --interval 1s
 ```
 
 ## Current Gaps

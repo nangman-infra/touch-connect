@@ -133,6 +133,9 @@ func TestWorkerCommandExecutorRegistersExecutionLogArtifact(t *testing.T) {
 	if len(snapshot.Artifacts) != 1 {
 		t.Fatalf("expected one execution log artifact, got %+v", snapshot.Artifacts)
 	}
+	if snapshot.Artifacts[0].TaskRef != "tc://task/command-artifact" {
+		t.Fatalf("expected artifact to inherit message correlation task, got %+v", snapshot.Artifacts[0])
+	}
 	lastCheckpoint := snapshot.Checkpoints[len(snapshot.Checkpoints)-1]
 	if lastCheckpoint.State != "completed" || len(lastCheckpoint.ArtifactRefs) != 1 {
 		t.Fatalf("expected completed checkpoint with artifact ref, got %+v", lastCheckpoint)
@@ -235,6 +238,7 @@ func ingressCommandMessage(t *testing.T, server *httptest.Server, request tcwork
 	req := contracts.MessageIngressRequest{
 		SenderEndpointRef: "tc://endpoint/ep_local_worker",
 		TargetCapability:  "code.change",
+		CorrelationRef:    "tc://task/command-artifact",
 		Payload: contracts.Payload{
 			Summary:    "run command",
 			Body:       commandBody(t, request),

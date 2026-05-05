@@ -45,11 +45,15 @@ func (e *AICLIExecutor) Execute(ctx context.Context, input ExecutionInput) (Exec
 	startedAt := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
-	command := exec.CommandContext(runCtx, e.command, e.args...)
+	prompt := llmPromptFromInput(input)
+	args, promptInArgs := aiCLIArgsWithPrompt(e.args, prompt)
+	command := exec.CommandContext(runCtx, e.command, args...)
 	if e.workDir != "" {
 		command.Dir = e.workDir
 	}
-	command.Stdin = strings.NewReader(llmPromptFromInput(input))
+	if !promptInArgs {
+		command.Stdin = strings.NewReader(prompt)
+	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -79,6 +83,20 @@ func (e *AICLIExecutor) Execute(ctx context.Context, input ExecutionInput) (Exec
 		ExitCode:   0,
 		DurationMS: durationMS,
 	}, nil
+}
+
+func aiCLIArgsWithPrompt(args []string, prompt string) ([]string, bool) {
+	out := make([]string, 0, len(args))
+	promptInArgs := false
+	for _, arg := range args {
+		next := strings.ReplaceAll(arg, "{{prompt}}", prompt)
+		next = strings.ReplaceAll(next, "{{PROMPT}}", prompt)
+		if next != arg {
+			promptInArgs = true
+		}
+		out = append(out, next)
+	}
+	return out, promptInArgs
 }
 
 func (o AICLIExecutorOptions) validated() (AICLIExecutorOptions, error) {

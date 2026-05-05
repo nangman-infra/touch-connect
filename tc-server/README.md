@@ -26,6 +26,15 @@ Detailed implementation docs are maintained as local living contracts and are in
 
 ## Local Run
 
+Compose is the default standalone local path:
+
+```text
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml run --rm tcctl endpoint list
+```
+
+Manual process mode is still useful while developing one component:
+
 ```text
 tc-server -h
 tc-server -bind 127.0.0.1:8080 -storage memory

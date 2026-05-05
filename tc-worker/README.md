@@ -2,6 +2,14 @@
 
 `tc-worker` is the execution endpoint runtime.
 
+AI worker onboarding is defined by the root worker contract:
+
+```text
+/absolute/path/to/touch-connect/WORKER.md
+```
+
+When an AI session is told "you are the worker", it should read that contract and start `tc-worker join`. It should not complete the assigned task only by answering in the chat window.
+
 Responsibilities:
 
 - register itself as an endpoint
@@ -61,7 +69,7 @@ Optional LLM settings:
 - `TC_WORKER_LLM_TIMEOUT` defaults to `60s`
 - `TC_WORKER_LLM_MAX_OUTPUT_TOKENS` limits the model output
 
-Skill mode loads `SKILL.md` guidance and injects it into the backend executor context. Its default backend is local AI CLI, not a provider API:
+Skill mode loads `SKILL.md` guidance and injects it into the backend executor context. Its default backend is local AI CLI, not a provider API. `SKILL.md` is the worker contract: it declares capabilities, tells the worker how to respond, and gives the backend AI CLI the task-specific rules.
 
 ```sh
 tcctl skill register /absolute/path/to/SKILL.md
@@ -81,5 +89,33 @@ Skill settings:
 - `TC_WORKER_SKILLS_DIR` loads every nested `SKILL.md` in an absolute directory
 - `TC_WORKER_SKILL_BACKEND` is `ai-cli`, `llm`, `command`, or `echo`; default is `ai-cli`
 - `TC_WORKER_CAPABILITIES` can narrow which registered skill capabilities this worker advertises
+
+Preferred local AI worker startup:
+
+```sh
+CLAUDE_MODEL=your-claude-model
+go run ./tc-worker/cmd/tc-worker join \
+  --backend claude \
+  --model "$CLAUDE_MODEL" \
+  --skills-dir /absolute/path/to/touch-connect/examples/skills \
+  --capabilities code.change
+```
+
+Backend presets are `claude`, `codex`, `gemini`, and `kiro`. The selected backend/model are recorded in endpoint execution hints.
+
+Raw debugging equivalent:
+
+```sh
+TC_WORKER_EXECUTOR=skill \
+TC_WORKER_SKILL_BACKEND=ai-cli \
+TC_WORKER_SKILLS_DIR=/absolute/path/to/touch-connect/examples/skills \
+TC_WORKER_CAPABILITIES=code.change \
+TC_WORKER_AI_CLI_COMMAND=claude \
+TC_WORKER_AI_CLI_ARGS=-p \
+TC_WORKER_AI_CLI_WORKDIR=/absolute/path/to/touch-connect \
+TC_WORKER_ARTIFACT_DIR=/tmp/tc-worker-ai/artifacts \
+TC_WORKER_SERVER_URL=http://127.0.0.1:8080 \
+go run ./tc-worker/cmd/tc-worker
+```
 
 Detailed implementation docs are maintained as local living contracts and are intentionally not tracked in the public Git repository.

@@ -15,8 +15,12 @@ Jenkins updates the running services through Watchtower after the first manual d
 ```sh
 cd /absolute/path/to/touch-connect/deploy/onprem
 mkdir -p data/server data/nats
+sudo chown -R 10001:10001 data/server
 cp .env.example .env
 ```
+
+`tc-server` runs as the non-root `touchconnect` user with UID `10001`; `data/server`
+must be writable by that UID so SQLite can create `/data/touch-connect.db`.
 
 Set `WATCHTOWER_HTTP_API_TOKEN` in `.env` to the same secret stored in Jenkins credential
 `nangman-infra-touch-connect-watchtower-token`.

@@ -99,6 +99,45 @@ func TestRunJoinWizardCanSelectCodexAndCustomModel(t *testing.T) {
 	}
 }
 
+func TestRunJoinWizardReportsNoUsableBackend(t *testing.T) {
+	lookup := func(string) (string, error) {
+		return "", errors.New("missing")
+	}
+	var out bytes.Buffer
+	_, err := RunJoinWizard(context.Background(), JoinWizardOptions{
+		Output:   &out,
+		LookPath: lookup,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no installed AI CLI backend") {
+		t.Fatalf("expected no backend error, got %v", err)
+	}
+	if !strings.Contains(out.String(), "Detected AI CLIs") {
+		t.Fatalf("expected candidate report, got %q", out.String())
+	}
+}
+
+func TestRunJoinWizardCanCancelAndUseFallbackModel(t *testing.T) {
+	lookup := func(command string) (string, error) {
+		if command == "claude" {
+			return "/mock/bin/claude", nil
+		}
+		return "", errors.New("missing")
+	}
+	input := strings.NewReader("1\n4\n\nn\n")
+	_, err := RunJoinWizard(context.Background(), JoinWizardOptions{
+		Input:    input,
+		Output:   ioDiscard{},
+		Base:     JoinOptions{SkillsDir: "/tmp/skills"},
+		LookPath: lookup,
+		AuthProbe: func(_ context.Context, candidate BackendCandidate) (string, string) {
+			return BackendStatusReady, "authenticated"
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("expected cancel error, got %v", err)
+	}
+}
+
 func assertCandidate(t *testing.T, candidate BackendCandidate, backend string, status string, path string) {
 	t.Helper()
 	if candidate.Backend != backend || candidate.Status != status || candidate.CommandPath != path {

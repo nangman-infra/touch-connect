@@ -2,11 +2,133 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
 )
+
+func TestRunProcessingLoopProcessesOneMessageAndStops(t *testing.T) {
+	client := &successfulLoopClient{
+		claim: contracts.ClaimMessageResponse{
+			MessageRef:       "tc://message/msg_loop",
+			AttemptRef:       "tc://attempt/att_loop",
+			EndpointRef:      "tc://endpoint/worker_loop",
+			LeaseExpiresAt:   time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
+			TargetCapability: "code.change",
+			Payload: contracts.Payload{
+				Summary: "loop claim",
+				Body:    "process exactly once",
+			},
+		},
+	}
+	worker := NewWithExecutor(client, Config{
+		EndpointRef:   "tc://endpoint/worker_loop",
+		DisplayName:   "loop worker",
+		ActorID:       "actor.loop",
+		WorkspaceID:   "workspace.loop",
+		WorkerVersion: "0.1.0-dev",
+		Capabilities:  []contracts.Capability{{Name: "code.change"}},
+	}, EchoExecutor{})
+
+	err := worker.runProcessingLoop(context.Background(), LoopOptions{
+		PollInterval: time.Millisecond,
+		MaxMessages:  1,
+	}, make(chan error))
+	if err != nil {
+		t.Fatalf("processing loop: %v", err)
+	}
+	if client.claims != 1 || client.completed != 1 {
+		t.Fatalf("expected one claim and completion, got claims=%d completed=%d", client.claims, client.completed)
+	}
+}
+
+func TestLoopHelpersHandleInterruptsAndValidation(t *testing.T) {
+	defaults := DefaultLoopOptions()
+	if defaults.PollInterval != time.Second || defaults.HeartbeatInterval != 10*time.Second {
+		t.Fatalf("unexpected default loop options: %+v", defaults)
+	}
+	accepted, err := (LoopOptions{}).Validated()
+	if err != nil {
+		t.Fatalf("validate empty loop options: %v", err)
+	}
+	if accepted.PollInterval != time.Second || accepted.HeartbeatInterval != 10*time.Second {
+		t.Fatalf("unexpected accepted defaults: %+v", accepted)
+	}
+	if _, err := (LoopOptions{PollInterval: -time.Second}).Validated(); err == nil {
+		t.Fatalf("expected negative loop option to fail")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	interrupted, err := processingLoopInterrupted(ctx, make(chan error))
+	if !interrupted || err != nil {
+		t.Fatalf("expected context interruption, interrupted=%t err=%v", interrupted, err)
+	}
+
+	heartbeatErrors := make(chan error, 1)
+	expected := errors.New("heartbeat failed")
+	heartbeatErrors <- expected
+	interrupted, err = processingLoopInterrupted(context.Background(), heartbeatErrors)
+	if interrupted || !errors.Is(err, expected) {
+		t.Fatalf("expected heartbeat error, interrupted=%t err=%v", interrupted, err)
+	}
+	if !maxMessagesReached(2, 2) || maxMessagesReached(1, 2) || maxMessagesReached(10, 0) {
+		t.Fatalf("max message helper mismatch")
+	}
+	if err := waitForNextPoll(ctx, time.Hour, make(chan error)); err != nil {
+		t.Fatalf("cancelled poll should exit cleanly: %v", err)
+	}
+	heartbeatErrors <- expected
+	if err := waitForNextPoll(context.Background(), time.Hour, heartbeatErrors); !errors.Is(err, expected) {
+		t.Fatalf("expected heartbeat error from poll, got %v", err)
+	}
+}
+
+func TestFinishClaimBranchesForExecutorFailuresAndTerminalOutcomes(t *testing.T) {
+	claim := contracts.ClaimMessageResponse{
+		MessageRef:       "tc://message/msg_finish",
+		AttemptRef:       "tc://attempt/att_finish",
+		EndpointRef:      "tc://endpoint/worker_finish",
+		LeaseExpiresAt:   time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
+		TargetCapability: "code.change",
+		Payload:          contracts.Payload{Summary: "finish claim", Body: "finish claim"},
+	}
+	for _, testCase := range []struct {
+		name    string
+		result  ExecutionResult
+		err     error
+		outcome string
+	}{
+		{name: "executor_error", err: errors.New("boom"), outcome: ExecutionOutcomeFailed},
+		{name: "invalid_result", result: ExecutionResult{Outcome: "unknown"}, outcome: ExecutionOutcomeFailed},
+		{name: "missing_fields", result: ExecutionResult{Outcome: ExecutionOutcomeMissingFields, MissingFields: []MissingField{{Name: "target", Reason: "missing"}}}, outcome: ExecutionOutcomeMissingFields},
+		{name: "failed", result: ExecutionResult{Outcome: ExecutionOutcomeFailed, Summary: "failed", FailureReasonCode: "worker_failed"}, outcome: ExecutionOutcomeFailed},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &successfulLoopClient{claim: claim}
+			worker := NewWithExecutor(client, Config{
+				EndpointRef:   "tc://endpoint/worker_finish",
+				DisplayName:   "finish worker",
+				ActorID:       "actor.finish",
+				WorkspaceID:   "workspace.finish",
+				WorkerVersion: "0.1.0-dev",
+				Capabilities:  []contracts.Capability{{Name: "code.change"}},
+			}, staticExecutor{result: testCase.result, err: testCase.err})
+			_, outcome, err := worker.finishClaimAfterAck(context.Background(), claim)
+			if testCase.err != nil {
+				if !errors.Is(err, testCase.err) {
+					t.Fatalf("expected executor error, got %v", err)
+				}
+				return
+			}
+			if err == nil && outcome != testCase.outcome {
+				t.Fatalf("unexpected outcome %s", outcome)
+			}
+		})
+	}
+}
 
 func TestProcessNextDropsRecoverableAttemptError(t *testing.T) {
 	client := &recoverableDropClient{
@@ -48,6 +170,97 @@ func TestProcessNextDropsRecoverableAttemptError(t *testing.T) {
 type recoverableDropClient struct {
 	claim           contracts.ClaimMessageResponse
 	checkpointCalls int
+}
+
+type successfulLoopClient struct {
+	claim     contracts.ClaimMessageResponse
+	claims    int
+	completed int
+}
+
+type staticExecutor struct {
+	result ExecutionResult
+	err    error
+}
+
+func (e staticExecutor) Execute(context.Context, ExecutionInput) (ExecutionResult, error) {
+	return e.result, e.err
+}
+
+func (c *successfulLoopClient) Health(context.Context) (contracts.HealthResponse, error) {
+	return contracts.HealthResponse{}, nil
+}
+
+func (c *successfulLoopClient) Version(context.Context) (contracts.VersionResponse, error) {
+	return contracts.VersionResponse{}, nil
+}
+
+func (c *successfulLoopClient) Snapshot(context.Context) (contracts.SnapshotResponse, error) {
+	return contracts.SnapshotResponse{}, nil
+}
+
+func (c *successfulLoopClient) RegisterEndpoint(context.Context, contracts.EndpointRegistrationRequest) (contracts.EndpointRegistrationResponse, error) {
+	return contracts.EndpointRegistrationResponse{}, nil
+}
+
+func (c *successfulLoopClient) HeartbeatEndpoint(context.Context, string, contracts.EndpointHeartbeatRequest) (contracts.EndpointHeartbeatResponse, error) {
+	return contracts.EndpointHeartbeatResponse{}, nil
+}
+
+func (c *successfulLoopClient) AdvertiseCapabilities(context.Context, string, contracts.CapabilityAdvertisementRequest) (contracts.CapabilityAdvertisementResponse, error) {
+	return contracts.CapabilityAdvertisementResponse{}, nil
+}
+
+func (c *successfulLoopClient) ClaimMessage(context.Context, string, contracts.ClaimMessageRequest) (contracts.ClaimMessageResponse, error) {
+	return c.claim, nil
+}
+
+func (c *successfulLoopClient) ClaimNextMessage(context.Context, contracts.ClaimNextMessageRequest) (contracts.ClaimNextMessageResponse, error) {
+	c.claims++
+	if c.claims > 1 {
+		return contracts.ClaimNextMessageResponse{Empty: true}, nil
+	}
+	return contracts.ClaimNextMessageResponse{Claim: &c.claim}, nil
+}
+
+func (c *successfulLoopClient) SubmitCheckpoint(context.Context, string, contracts.CheckpointRequest) (contracts.CheckpointResponse, error) {
+	return contracts.CheckpointResponse{}, nil
+}
+
+func (c *successfulLoopClient) SubmitReadback(context.Context, string, contracts.ReadbackRequest) (contracts.ReadbackResponse, error) {
+	return contracts.ReadbackResponse{}, nil
+}
+
+func (c *successfulLoopClient) RefreshLease(context.Context, string, contracts.RefreshLeaseRequest) (contracts.RefreshLeaseResponse, error) {
+	return contracts.RefreshLeaseResponse{
+		AttemptRef:     c.claim.AttemptRef,
+		State:          "claimed",
+		LeaseExpiresAt: time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
+	}, nil
+}
+
+func (c *successfulLoopClient) RegisterArtifactVersion(context.Context, string, contracts.ArtifactVersionRequest) (contracts.ArtifactVersionResponse, error) {
+	return contracts.ArtifactVersionResponse{}, nil
+}
+
+func (c *successfulLoopClient) RecordApprovalDecision(context.Context, string, contracts.ApprovalDecisionRequest) (contracts.ApprovalDecisionResponse, error) {
+	return contracts.ApprovalDecisionResponse{}, nil
+}
+
+func (c *successfulLoopClient) StartSideEffectExecution(context.Context, string, contracts.SideEffectExecutionRequest) (contracts.SideEffectExecutionResponse, error) {
+	return contracts.SideEffectExecutionResponse{}, nil
+}
+
+func (c *successfulLoopClient) CompleteSideEffectExecution(context.Context, string, contracts.CompleteSideEffectExecutionRequest) (contracts.CompleteSideEffectExecutionResponse, error) {
+	return contracts.CompleteSideEffectExecutionResponse{}, nil
+}
+
+func (c *successfulLoopClient) CompleteAttempt(context.Context, string, contracts.CompleteAttemptRequest) (contracts.CompleteAttemptResponse, error) {
+	c.completed++
+	return contracts.CompleteAttemptResponse{
+		AttemptRef: c.claim.AttemptRef,
+		State:      "completed",
+	}, nil
 }
 
 func (c *recoverableDropClient) Health(context.Context) (contracts.HealthResponse, error) {

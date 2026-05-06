@@ -62,7 +62,7 @@ func TestRunJoinWizardAutoAcceptsFirstUsableBackend(t *testing.T) {
 		t.Fatalf("unexpected wizard options: %+v", options)
 	}
 	output := out.String()
-	for _, want := range []string{"Detected AI CLIs", "Available worker choices", "permission: non-interactive auto-approve"} {
+	for _, want := range []string{"Detected AI CLIs", "Available worker choices", "permission: auto-approve"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected wizard output to contain %q, got:\n%s", want, output)
 		}

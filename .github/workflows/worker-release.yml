@@ -1,0 +1,88 @@
+name: tc-worker release
+
+on:
+  push:
+    tags:
+      - "worker-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example worker-v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish tc-worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test worker packages
+        run: go test ./tc-worker/...
+
+      - name: Build release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          case "$tag" in
+            worker-v*) ;;
+            *) echo "tc-worker release tags must start with worker-v: $tag" >&2; exit 1 ;;
+          esac
+
+          rm -rf dist
+          mkdir -p dist
+
+          build_one() {
+            goos="$1"
+            goarch="$2"
+            suffix="$3"
+            work="dist/build-${suffix}"
+            mkdir -p "$work"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${tag} -X main.commit=${GITHUB_SHA}" \
+              -o "${work}/tc-worker" \
+              ./tc-worker/cmd/tc-worker
+            tar -C "$work" -czf "dist/tc-worker_${suffix}.tar.gz" tc-worker
+          }
+
+          build_one darwin amd64 Darwin_x86_64
+          build_one darwin arm64 Darwin_arm64
+          build_one linux amd64 Linux_x86_64
+          build_one linux arm64 Linux_arm64
+
+          cd dist
+          sha256sum tc-worker_*.tar.gz > checksums.txt
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/tc-worker_*.tar.gz dist/checksums.txt --clobber
+          else
+            gh release create "$tag" dist/tc-worker_*.tar.gz dist/checksums.txt \
+              --title "tc-worker ${tag}" \
+              --notes "tc-worker binaries for macOS and Linux on amd64 and arm64."
+          fi

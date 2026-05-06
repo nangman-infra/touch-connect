@@ -1,0 +1,60 @@
+name: tc-worker sonar
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "tc-worker/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/worker-sonar.yml"
+  pull_request:
+    paths:
+      - "tc-worker/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/worker-sonar.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sonar:
+    name: Analyze tc-worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test worker with coverage
+        run: |
+          go test ./tc-worker/... \
+            -coverpkg=./tc-worker/... \
+            -coverprofile=coverage.worker.out
+
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarqube.nangman.cloud
+        with:
+          args: >
+            "-Dsonar.projectKey=touch-connect-worker"
+            "-Dsonar.projectName=touch-connect-worker"
+            "-Dsonar.projectVersion=${{ github.sha }}"
+            "-Dsonar.sourceEncoding=UTF-8"
+            "-Dsonar.sources=tc-worker"
+            "-Dsonar.tests=tc-worker"
+            "-Dsonar.test.inclusions=**/*_test.go"
+            "-Dsonar.exclusions=**/*_test.go,**/vendor/**,**/node_modules/**"
+            "-Dsonar.go.coverage.reportPaths=coverage.worker.out"

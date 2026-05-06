@@ -130,6 +130,12 @@ func ConfigFromEnv() Config {
 	if model := strings.TrimSpace(os.Getenv("TC_WORKER_MODEL")); model != "" {
 		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "model:"+model)
 	}
+	if role := strings.TrimSpace(os.Getenv("TC_WORKER_ROLE")); role != "" {
+		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "role:"+role)
+	}
+	if permission := strings.TrimSpace(os.Getenv("TC_WORKER_PERMISSION")); permission != "" {
+		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "permission:"+permission)
+	}
 	return config
 }
 

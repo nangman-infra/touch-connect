@@ -29,13 +29,14 @@ type BackendCandidate struct {
 }
 
 type JoinWizardOptions struct {
-	Input      io.Reader
-	Output     io.Writer
-	Base       JoinOptions
-	AutoAccept bool
-	UseTUI     bool
-	LookPath   func(string) (string, error)
-	AuthProbe  func(context.Context, BackendCandidate) (string, string)
+	Input        io.Reader
+	Output       io.Writer
+	Base         JoinOptions
+	AutoAccept   bool
+	UseTUI       bool
+	LookPath     func(string) (string, error)
+	AuthProbe    func(context.Context, BackendCandidate) (string, string)
+	ConfirmLabel string
 }
 
 func RunJoinWizard(ctx context.Context, options JoinWizardOptions) (JoinOptions, error) {
@@ -117,9 +118,13 @@ func RunJoinWizard(ctx context.Context, options JoinWizardOptions) (JoinOptions,
 	fmt.Fprintf(output, "  model:      %s\n", printableModel(model))
 	fmt.Fprintf(output, "  command:    %s\n", result.Command)
 	fmt.Fprintf(output, "  server:     %s\n", defaultString(result.ServerURL, "http://127.0.0.1:8080"))
-	fmt.Fprintln(output, "  permission: non-interactive auto-approve")
+	fmt.Fprintf(output, "  permission: %s\n", defaultString(result.Permission, DefaultWorkerPermission))
 	if !options.AutoAccept {
-		confirmed, err := promptConfirm(reader, output, "Start worker?", true)
+		label := options.ConfirmLabel
+		if strings.TrimSpace(label) == "" {
+			label = "Start worker?"
+		}
+		confirmed, err := promptConfirm(reader, output, label, true)
 		if err != nil {
 			return JoinOptions{}, err
 		}

@@ -28,7 +28,9 @@ type JoinOptions struct {
 	DisplayName       string
 	ActorID           string
 	WorkspaceID       string
+	Role              string
 	Capabilities      string
+	Permission        string
 	SkillsDir         string
 	SkillPaths        []string
 	WorkDir           string
@@ -86,8 +88,10 @@ func BuildJoinEnvironment(options JoinOptions) (JoinEnvironment, error) {
 		"TC_WORKER_DISPLAY_NAME":       accepted.DisplayName,
 		"TC_WORKER_ACTOR_ID":           accepted.ActorID,
 		"TC_WORKER_WORKSPACE_ID":       accepted.WorkspaceID,
+		"TC_WORKER_ROLE":               accepted.Role,
 		"TC_WORKER_BACKEND":            preset.Backend,
 		"TC_WORKER_MODEL":              model,
+		"TC_WORKER_PERMISSION":         accepted.Permission,
 		"TC_WORKER_EXECUTOR":           "skill",
 		"TC_WORKER_SKILL_BACKEND":      "ai-cli",
 		"TC_WORKER_AI_CLI_COMMAND":     command,
@@ -181,6 +185,12 @@ func (o JoinOptions) withDefaults() (JoinOptions, error) {
 	if o.WorkspaceID == "" {
 		o.WorkspaceID = "workspace.local"
 	}
+	if o.Role == "" {
+		o.Role = DefaultWorkerRole
+	}
+	if o.Permission == "" {
+		o.Permission = DefaultWorkerPermission
+	}
 	if o.Timeout == 0 {
 		o.Timeout = 10 * time.Minute
 	}
@@ -200,7 +210,7 @@ func (o JoinOptions) withDefaults() (JoinOptions, error) {
 		return JoinOptions{}, errors.New("--heartbeat-interval must not be negative")
 	}
 	if o.Sandbox == "" {
-		o.Sandbox = "read-only"
+		o.Sandbox = "danger-full-access"
 	}
 	return o, nil
 }

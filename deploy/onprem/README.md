@@ -13,10 +13,8 @@ Jenkins updates the running services through Watchtower after the first manual d
 ## First deploy
 
 ```sh
-sudo mkdir -p /srv/touch-connect/server /srv/touch-connect/nats
-sudo chown -R "$USER":"$USER" /srv/touch-connect
-
 cd /absolute/path/to/touch-connect/deploy/onprem
+mkdir -p data/server data/nats
 cp .env.example .env
 ```
 

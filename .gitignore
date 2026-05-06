@@ -8,6 +8,7 @@ docs/
 
 # Local deployment secrets.
 deploy/onprem/.env
+deploy/onprem/data/
 
 # Local/Jenkins Go coverage output.
 coverage.out

@@ -47,6 +47,12 @@ func TestRunRootVersionHelpAndLegacyEnvFallback(t *testing.T) {
 	if err := rootCommands()["uninstall"](context.Background(), []string{"--help"}); err != nil {
 		t.Fatalf("uninstall help should not fail: %v", err)
 	}
+	if err := runSetup(context.Background(), []string{"--help"}); err != nil {
+		t.Fatalf("setup help should not continue into setup flow: %v", err)
+	}
+	if err := runJoin(context.Background(), []string{"--help"}); err != nil {
+		t.Fatalf("join help should not continue into worker startup: %v", err)
+	}
 
 	t.Setenv("TC_WORKER_SERVER_URL", "")
 	if err := runRoot(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "TC_WORKER_SERVER_URL is required") {

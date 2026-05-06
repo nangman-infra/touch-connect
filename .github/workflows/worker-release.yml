@@ -21,6 +21,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -28,10 +31,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Test worker packages
-        run: go test ./tc-worker/...
-
-      - name: Build release archives
+      - name: Resolve release tag
+        id: release
         shell: bash
         run: |
           set -euo pipefail
@@ -43,31 +44,10 @@ jobs:
             worker-v*) ;;
             *) echo "tc-worker release tags must start with worker-v: $tag" >&2; exit 1 ;;
           esac
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-          rm -rf dist
-          mkdir -p dist
-
-          build_one() {
-            goos="$1"
-            goarch="$2"
-            suffix="$3"
-            work="dist/build-${suffix}"
-            mkdir -p "$work"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
-              -trimpath \
-              -ldflags "-s -w -X main.version=${tag} -X main.commit=${GITHUB_SHA}" \
-              -o "${work}/tc-worker" \
-              ./tc-worker/cmd/tc-worker
-            tar -C "$work" -czf "dist/tc-worker_${suffix}.tar.gz" tc-worker
-          }
-
-          build_one darwin amd64 Darwin_x86_64
-          build_one darwin arm64 Darwin_arm64
-          build_one linux amd64 Linux_x86_64
-          build_one linux arm64 Linux_arm64
-
-          cd dist
-          sha256sum tc-worker_*.tar.gz > checksums.txt
+      - name: Run worker release readiness gate
+        run: scripts/worker-release-readiness.sh "${{ steps.release.outputs.tag }}"
 
       - name: Publish GitHub release
         env:
@@ -75,21 +55,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${{ github.event.inputs.tag }}"
-          if [ -z "$tag" ]; then
-            tag="${GITHUB_REF_NAME}"
-          fi
-          release_flags=()
+          tag="${{ steps.release.outputs.tag }}"
+          files=(dist/tc-worker_*.tar.gz dist/checksums.txt dist/worker-release-manifest.json)
+          notes_file=".github/release-notes/${tag}.md"
+          create_flags=()
+          edit_flags=()
           case "$tag" in
             *-alpha*|*-beta*|*-rc*)
-              release_flags+=(--prerelease)
+              create_flags+=(--prerelease)
+              create_flags+=(--latest=false)
+              edit_flags+=(--prerelease)
               ;;
           esac
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/tc-worker_*.tar.gz dist/checksums.txt --clobber
+            if [ -f "${notes_file}" ]; then
+              gh release edit "$tag" \
+                --title "tc-worker ${tag}" \
+                --notes-file "${notes_file}" \
+                "${edit_flags[@]}"
+            else
+              gh release edit "$tag" \
+                --title "tc-worker ${tag}" \
+                "${edit_flags[@]}"
+            fi
+            gh release upload "$tag" "${files[@]}" --clobber
           else
-            gh release create "$tag" dist/tc-worker_*.tar.gz dist/checksums.txt \
-              "${release_flags[@]}" \
-              --title "tc-worker ${tag}" \
-              --notes "tc-worker binaries for macOS and Linux on amd64 and arm64."
+            if [ -f "${notes_file}" ]; then
+              gh release create "$tag" "${files[@]}" \
+                "${create_flags[@]}" \
+                --verify-tag \
+                --title "tc-worker ${tag}" \
+                --notes-file "${notes_file}"
+            else
+              gh release create "$tag" "${files[@]}" \
+                "${create_flags[@]}" \
+                --verify-tag \
+                --title "tc-worker ${tag}" \
+                --generate-notes
+            fi
           fi

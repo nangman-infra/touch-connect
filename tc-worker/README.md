@@ -12,6 +12,13 @@ Install or update only the worker binary:
 curl -fsSL https://raw.githubusercontent.com/nangman-infra/touch-connect/main/scripts/install-worker.sh | sh
 ```
 
+For the current alpha prerelease, install with an explicit version because GitHub does not expose prereleases through the `latest` download URL:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nangman-infra/touch-connect/main/scripts/install-worker.sh \
+  | VERSION=worker-v0.1.0-alpha.2 sh
+```
+
 Then configure once:
 
 ```sh

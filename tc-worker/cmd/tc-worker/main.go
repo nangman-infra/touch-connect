@@ -118,6 +118,9 @@ func runJoin(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if parsed.Help {
+		return nil
+	}
 	base, err := resolveJoinOptions(ctx, parsed)
 	if err != nil {
 		return err
@@ -149,6 +152,7 @@ type joinRunOptions struct {
 	Plain      bool
 	Yes        bool
 	DryRun     bool
+	Help       bool
 	Visited    map[string]bool
 	Options    tcworker.JoinOptions
 }
@@ -200,7 +204,8 @@ func parseJoinArgs(args []string) (joinRunOptions, error) {
 	}
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
-			return joinRunOptions{}, nil
+			parsed.Help = true
+			return parsed, nil
 		}
 		return joinRunOptions{}, err
 	}

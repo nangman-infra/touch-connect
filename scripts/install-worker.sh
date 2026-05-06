@@ -2,8 +2,8 @@
 set -eu
 
 repo="${TC_WORKER_REPO:-nangman-infra/touch-connect}"
-version="${TC_WORKER_VERSION:-latest}"
-install_dir="${TC_INSTALL_DIR:-$HOME/.local/bin}"
+version="${TC_WORKER_VERSION:-${VERSION:-latest}}"
+install_dir="${TC_INSTALL_DIR:-${INSTALL_DIR:-$HOME/.local/bin}}"
 
 case "$(uname -s)" in
   Darwin) os="Darwin" ;;

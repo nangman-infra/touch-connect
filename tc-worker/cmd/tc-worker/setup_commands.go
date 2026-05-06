@@ -29,12 +29,16 @@ type setupFlowOptions struct {
 	Plain          bool
 	ConfirmLabel   string
 	NonInteractive bool
+	Help           bool
 }
 
 func runSetup(ctx context.Context, args []string) error {
 	parsed, err := parseSetupArgs(args)
 	if err != nil {
 		return err
+	}
+	if parsed.Help {
+		return nil
 	}
 	config, path, err := runSetupFlow(ctx, parsed)
 	if err != nil {
@@ -85,7 +89,8 @@ func parseSetupArgs(args []string) (setupFlowOptions, error) {
 	}
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
-			return setupFlowOptions{}, nil
+			parsed.Help = true
+			return parsed, nil
 		}
 		return setupFlowOptions{}, err
 	}

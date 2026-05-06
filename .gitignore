@@ -14,3 +14,6 @@ deploy/onprem/data/
 # Local/Jenkins Go coverage output.
 coverage.out
 coverage.*.out
+
+# Local release build output.
+dist/

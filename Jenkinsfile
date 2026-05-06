@@ -263,7 +263,7 @@ pipeline {
                                     sonar.sources=internal,tc-server,tc-control
                                     sonar.tests=internal,tc-server,tc-control,tests
                                     sonar.test.inclusions=**/*_test.go
-                                    sonar.exclusions=**/vendor/**,**/.touch-connect/**,**/coverage/**,**/node_modules/**,tc-worker/**,tcctl/**,examples/**,deploy/**
+                                    sonar.exclusions=**/*_test.go,**/vendor/**,**/.touch-connect/**,**/coverage/**,**/node_modules/**,tc-worker/**,tcctl/**,examples/**,deploy/**
                                     sonar.go.coverage.reportPaths=${env.GO_COVERAGE_REPORT}
                                 """.stripIndent().trim() + '\n'
                             )

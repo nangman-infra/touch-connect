@@ -59,12 +59,18 @@ func TestResolveJoinOptionsLoadsConfigAndAppliesOverrides(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	options, err := resolveJoinOptions(context.Background(), configPath, false, false, true, true, map[string]bool{
-		"role":         true,
-		"capabilities": true,
-	}, tcworker.JoinOptions{
-		Role:         "reviewer",
-		Capabilities: "ai.review",
+	options, err := resolveJoinOptions(context.Background(), joinRunOptions{
+		ConfigPath: configPath,
+		Plain:      true,
+		Yes:        true,
+		Visited: map[string]bool{
+			"role":         true,
+			"capabilities": true,
+		},
+		Options: tcworker.JoinOptions{
+			Role:         "reviewer",
+			Capabilities: "ai.review",
+		},
 	})
 	if err != nil {
 		t.Fatalf("resolve join options: %v", err)
@@ -75,7 +81,12 @@ func TestResolveJoinOptionsLoadsConfigAndAppliesOverrides(t *testing.T) {
 }
 
 func TestResolveJoinOptionsRequiresConfigOrExplicitFlags(t *testing.T) {
-	_, err := resolveJoinOptions(context.Background(), filepath.Join(t.TempDir(), "missing.json"), false, false, true, true, map[string]bool{}, tcworker.JoinOptions{})
+	_, err := resolveJoinOptions(context.Background(), joinRunOptions{
+		ConfigPath: filepath.Join(t.TempDir(), "missing.json"),
+		Plain:      true,
+		Yes:        true,
+		Visited:    map[string]bool{},
+	})
 	if err == nil || !strings.Contains(err.Error(), "worker config not found") {
 		t.Fatalf("expected missing config error, got %v", err)
 	}

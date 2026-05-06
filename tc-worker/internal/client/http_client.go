@@ -16,6 +16,8 @@ type HTTPClient struct {
 	client  *http.Client
 }
 
+const attemptPathPrefix = "/v1/attempts/"
+
 func NewHTTPClient(baseURL string, httpClient *http.Client) *HTTPClient {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -76,37 +78,37 @@ func (c *HTTPClient) ClaimNextMessage(ctx context.Context, req contracts.ClaimNe
 
 func (c *HTTPClient) SubmitCheckpoint(ctx context.Context, attemptRef string, req contracts.CheckpointRequest) (contracts.CheckpointResponse, error) {
 	var res contracts.CheckpointResponse
-	err := c.post(ctx, "/v1/attempts/"+attemptRef+"/checkpoints", req, &res)
+	err := c.post(ctx, attemptPath(attemptRef, "checkpoints"), req, &res)
 	return res, err
 }
 
 func (c *HTTPClient) SubmitReadback(ctx context.Context, attemptRef string, req contracts.ReadbackRequest) (contracts.ReadbackResponse, error) {
 	var res contracts.ReadbackResponse
-	err := c.post(ctx, "/v1/attempts/"+attemptRef+"/readback", req, &res)
+	err := c.post(ctx, attemptPath(attemptRef, "readback"), req, &res)
 	return res, err
 }
 
 func (c *HTTPClient) RefreshLease(ctx context.Context, attemptRef string, req contracts.RefreshLeaseRequest) (contracts.RefreshLeaseResponse, error) {
 	var res contracts.RefreshLeaseResponse
-	err := c.post(ctx, "/v1/attempts/"+attemptRef+"/lease", req, &res)
+	err := c.post(ctx, attemptPath(attemptRef, "lease"), req, &res)
 	return res, err
 }
 
 func (c *HTTPClient) RegisterArtifactVersion(ctx context.Context, attemptRef string, req contracts.ArtifactVersionRequest) (contracts.ArtifactVersionResponse, error) {
 	var res contracts.ArtifactVersionResponse
-	err := c.post(ctx, "/v1/attempts/"+attemptRef+"/artifacts", req, &res)
+	err := c.post(ctx, attemptPath(attemptRef, "artifacts"), req, &res)
 	return res, err
 }
 
 func (c *HTTPClient) RecordApprovalDecision(ctx context.Context, attemptRef string, req contracts.ApprovalDecisionRequest) (contracts.ApprovalDecisionResponse, error) {
 	var res contracts.ApprovalDecisionResponse
-	err := c.post(ctx, "/v1/attempts/"+attemptRef+"/approvals", req, &res)
+	err := c.post(ctx, attemptPath(attemptRef, "approvals"), req, &res)
 	return res, err
 }
 
 func (c *HTTPClient) StartSideEffectExecution(ctx context.Context, attemptRef string, req contracts.SideEffectExecutionRequest) (contracts.SideEffectExecutionResponse, error) {
 	var res contracts.SideEffectExecutionResponse
-	err := c.post(ctx, "/v1/attempts/"+attemptRef+"/side-effects", req, &res)
+	err := c.post(ctx, attemptPath(attemptRef, "side-effects"), req, &res)
 	return res, err
 }
 
@@ -118,8 +120,12 @@ func (c *HTTPClient) CompleteSideEffectExecution(ctx context.Context, executionR
 
 func (c *HTTPClient) CompleteAttempt(ctx context.Context, attemptRef string, req contracts.CompleteAttemptRequest) (contracts.CompleteAttemptResponse, error) {
 	var res contracts.CompleteAttemptResponse
-	err := c.post(ctx, "/v1/attempts/"+attemptRef+"/complete", req, &res)
+	err := c.post(ctx, attemptPath(attemptRef, "complete"), req, &res)
 	return res, err
+}
+
+func attemptPath(attemptRef string, suffix string) string {
+	return attemptPathPrefix + attemptRef + "/" + suffix
 }
 
 func (c *HTTPClient) get(ctx context.Context, path string, target any) error {

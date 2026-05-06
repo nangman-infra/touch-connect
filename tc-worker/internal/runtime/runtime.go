@@ -146,48 +146,65 @@ func (r *Runtime) finishClaimAfterAck(ctx context.Context, claim contracts.Claim
 		}
 	}()
 	input := r.executionInputForClaim(ctx, claim)
+	result, err := r.executeAndValidateClaim(executionCtx, ctx, claim, input)
+	if err != nil {
+		return "", ExecutionOutcomeFailed, err
+	}
+	accepted, err := r.recordResultArtifactWhenNeeded(ctx, claim, result)
+	if err != nil {
+		return "", ExecutionOutcomeFailed, err
+	}
+	return r.finishAcceptedClaim(ctx, claim, accepted)
+}
+
+func (r *Runtime) executeAndValidateClaim(executionCtx context.Context, ctx context.Context, claim contracts.ClaimMessageResponse, input ExecutionInput) (ExecutionResult, error) {
 	result, err := r.executor.Execute(executionCtx, input)
 	if err != nil {
-		failedResult := ExecutionResult{
+		r.recordAndFailClaim(ctx, claim, ExecutionResult{
 			Outcome:           ExecutionOutcomeFailed,
 			Summary:           "worker executor returned an error",
 			FailureReasonCode: "executor_error",
-		}
-		if recorded, recordErr := r.recordExecutionArtifact(ctx, claim, failedResult); recordErr == nil {
-			failedResult = recorded
-		}
-		_ = r.failClaim(ctx, claim, failedResult)
-		return "", ExecutionOutcomeFailed, err
+		})
+		return ExecutionResult{}, err
 	}
 	accepted, err := result.validated()
 	if err != nil {
-		failedResult := ExecutionResult{
+		r.recordAndFailClaim(ctx, claim, ExecutionResult{
 			Outcome:           ExecutionOutcomeFailed,
 			Summary:           "worker executor returned an invalid result",
 			FailureReasonCode: "invalid_executor_result",
-		}
-		if recorded, recordErr := r.recordExecutionArtifact(ctx, claim, failedResult); recordErr == nil {
-			failedResult = recorded
-		}
-		_ = r.failClaim(ctx, claim, failedResult)
-		return "", ExecutionOutcomeFailed, err
+		})
+		return ExecutionResult{}, err
 	}
-	if accepted.Outcome != ExecutionOutcomeMissingFields {
-		accepted, err = r.recordExecutionArtifact(ctx, claim, accepted)
-		if err != nil {
-			return "", ExecutionOutcomeFailed, err
-		}
+	return accepted, nil
+}
+
+func (r *Runtime) recordAndFailClaim(ctx context.Context, claim contracts.ClaimMessageResponse, result ExecutionResult) {
+	recorded, err := r.recordExecutionArtifact(ctx, claim, result)
+	if err == nil {
+		result = recorded
 	}
-	switch accepted.Outcome {
+	_ = r.failClaim(ctx, claim, result)
+}
+
+func (r *Runtime) recordResultArtifactWhenNeeded(ctx context.Context, claim contracts.ClaimMessageResponse, result ExecutionResult) (ExecutionResult, error) {
+	if result.Outcome == ExecutionOutcomeMissingFields {
+		return result, nil
+	}
+	return r.recordExecutionArtifact(ctx, claim, result)
+}
+
+func (r *Runtime) finishAcceptedClaim(ctx context.Context, claim contracts.ClaimMessageResponse, result ExecutionResult) (string, string, error) {
+	switch result.Outcome {
 	case ExecutionOutcomeMissingFields:
-		return claim.AttemptRef, ExecutionOutcomeMissingFields, r.blockClaimForMissingFields(ctx, claim, accepted.MissingFields)
+		return claim.AttemptRef, ExecutionOutcomeMissingFields, r.blockClaimForMissingFields(ctx, claim, result.MissingFields)
 	case ExecutionOutcomeFailed:
-		return claim.AttemptRef, ExecutionOutcomeFailed, r.failClaim(ctx, claim, accepted)
+		return claim.AttemptRef, ExecutionOutcomeFailed, r.failClaim(ctx, claim, result)
 	default:
 		if isCanonicalScenario(claim) {
-			return claim.AttemptRef, ExecutionOutcomeCompleted, r.completeCanonicalClaim(ctx, claim, accepted)
+			return claim.AttemptRef, ExecutionOutcomeCompleted, r.completeCanonicalClaim(ctx, claim, result)
 		}
-		return claim.AttemptRef, ExecutionOutcomeCompleted, r.completeClaim(ctx, claim, accepted)
+		return claim.AttemptRef, ExecutionOutcomeCompleted, r.completeClaim(ctx, claim, result)
 	}
 }
 

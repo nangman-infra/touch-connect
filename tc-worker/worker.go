@@ -48,6 +48,7 @@ const (
 	ExecutionOutcomeMissingFields = runtime.ExecutionOutcomeMissingFields
 	ExecutionOutcomeFailed        = runtime.ExecutionOutcomeFailed
 	ExecutionOutcomeDropped       = runtime.ExecutionOutcomeDropped
+	executorAICLI                 = "ai-cli"
 )
 
 func NewHTTPRuntime(serverURL string, httpClient *http.Client, config Config) *runtime.Runtime {
@@ -98,6 +99,13 @@ func DefaultConfig() Config {
 
 func ConfigFromEnv() Config {
 	config := DefaultConfig()
+	config = configIdentityFromEnv(config)
+	config = configCapabilitiesFromEnv(config)
+	config.ExecutionHints = appendWorkerExecutionHints(config.ExecutionHints)
+	return config
+}
+
+func configIdentityFromEnv(config Config) Config {
 	if value := os.Getenv("TC_WORKER_ENDPOINT_REF"); value != "" {
 		config.EndpointRef = value
 	}
@@ -113,6 +121,10 @@ func ConfigFromEnv() Config {
 	if value := os.Getenv("TC_WORKER_VERSION"); value != "" {
 		config.WorkerVersion = value
 	}
+	return config
+}
+
+func configCapabilitiesFromEnv(config Config) Config {
 	if value := os.Getenv("TC_WORKER_CAPABILITIES"); value != "" {
 		capabilities := capabilitiesFromCSV(value)
 		if len(capabilities) > 0 {
@@ -124,19 +136,23 @@ func ConfigFromEnv() Config {
 			config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "skill_guided")
 		}
 	}
+	return config
+}
+
+func appendWorkerExecutionHints(hints []string) []string {
 	if backend := strings.TrimSpace(os.Getenv("TC_WORKER_BACKEND")); backend != "" {
-		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "backend:"+backend)
+		hints = appendUniqueStrings(hints, "backend:"+backend)
 	}
 	if model := strings.TrimSpace(os.Getenv("TC_WORKER_MODEL")); model != "" {
-		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "model:"+model)
+		hints = appendUniqueStrings(hints, "model:"+model)
 	}
 	if role := strings.TrimSpace(os.Getenv("TC_WORKER_ROLE")); role != "" {
-		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "role:"+role)
+		hints = appendUniqueStrings(hints, "role:"+role)
 	}
 	if permission := strings.TrimSpace(os.Getenv("TC_WORKER_PERMISSION")); permission != "" {
-		config.ExecutionHints = appendUniqueStrings(config.ExecutionHints, "permission:"+permission)
+		hints = appendUniqueStrings(hints, "permission:"+permission)
 	}
-	return config
+	return hints
 }
 
 func DefaultLoopOptions() LoopOptions {
@@ -197,7 +213,7 @@ func ExecutorFromEnv() (WorkerExecutor, error) {
 		return NewCommandExecutor(options)
 	case "llm":
 		return llmExecutorFromEnv()
-	case "ai-cli", "aicli", "cli":
+	case executorAICLI, "aicli", "cli":
 		return aiCLIExecutorFromEnv()
 	case "skill":
 		return skillExecutorFromEnv()
@@ -332,7 +348,7 @@ func skillExecutorFromEnv() (WorkerExecutor, error) {
 	}
 	backendKind := strings.ToLower(strings.TrimSpace(os.Getenv("TC_WORKER_SKILL_BACKEND")))
 	if backendKind == "" {
-		backendKind = "ai-cli"
+		backendKind = executorAICLI
 	}
 	backend, err := backendExecutorFromEnv(backendKind)
 	if err != nil {
@@ -343,7 +359,7 @@ func skillExecutorFromEnv() (WorkerExecutor, error) {
 
 func backendExecutorFromEnv(kind string) (WorkerExecutor, error) {
 	switch kind {
-	case "ai-cli", "aicli", "cli":
+	case executorAICLI, "aicli", "cli":
 		return aiCLIExecutorFromEnv()
 	case "echo":
 		return EchoExecutor{}, nil

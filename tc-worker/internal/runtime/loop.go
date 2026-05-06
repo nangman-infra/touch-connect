@@ -106,42 +106,65 @@ func (r *Runtime) MarkOffline(ctx context.Context) error {
 func (r *Runtime) runProcessingLoop(ctx context.Context, options LoopOptions, heartbeatErrors <-chan error) error {
 	processed := 0
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-heartbeatErrors:
+		interrupted, err := processingLoopInterrupted(ctx, heartbeatErrors)
+		if interrupted || err != nil {
 			return err
-		default:
 		}
+
 		result, err := r.ProcessNext(ctx)
 		if err != nil {
 			return err
 		}
-		if !result.Empty {
-			processed++
-			log.Printf("worker processed message_ref=%s attempt_ref=%s task_ref=%s correlation_ref=%s outcome=%s completed=%t blocked=%t failed=%t",
-				result.MessageRef,
-				result.AttemptRef,
-				result.TaskRef,
-				result.CorrelationRef,
-				result.Outcome,
-				result.Completed,
-				result.Blocked,
-				result.Failed,
-			)
-			if result.Dropped {
-				log.Printf("worker dropped attempt_ref=%s message_ref=%s reason=%s", result.AttemptRef, result.MessageRef, result.DropReason)
-				continue
-			}
-			if options.MaxMessages > 0 && processed >= options.MaxMessages {
-				return nil
+
+		if result.Empty {
+			if err := waitForNextPoll(ctx, options.PollInterval, heartbeatErrors); err != nil {
+				return err
 			}
 			continue
 		}
-		if err := waitForNextPoll(ctx, options.PollInterval, heartbeatErrors); err != nil {
-			return err
+
+		processed++
+		logProcessedResult(result)
+		if result.Dropped {
+			logDroppedResult(result)
+			continue
+		}
+		if maxMessagesReached(processed, options.MaxMessages) {
+			return nil
 		}
 	}
+}
+
+func processingLoopInterrupted(ctx context.Context, heartbeatErrors <-chan error) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return true, nil
+	case err := <-heartbeatErrors:
+		return false, err
+	default:
+		return false, nil
+	}
+}
+
+func logProcessedResult(result ProcessResult) {
+	log.Printf("worker processed message_ref=%s attempt_ref=%s task_ref=%s correlation_ref=%s outcome=%s completed=%t blocked=%t failed=%t",
+		result.MessageRef,
+		result.AttemptRef,
+		result.TaskRef,
+		result.CorrelationRef,
+		result.Outcome,
+		result.Completed,
+		result.Blocked,
+		result.Failed,
+	)
+}
+
+func logDroppedResult(result ProcessResult) {
+	log.Printf("worker dropped attempt_ref=%s message_ref=%s reason=%s", result.AttemptRef, result.MessageRef, result.DropReason)
+}
+
+func maxMessagesReached(processed int, maxMessages int) bool {
+	return maxMessages > 0 && processed >= maxMessages
 }
 
 func (r *Runtime) heartbeatLoop(ctx context.Context, interval time.Duration, errors chan<- error) {

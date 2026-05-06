@@ -20,6 +20,8 @@ import (
 
 const defaultWorkerReleaseRepo = "nangman-infra/touch-connect"
 
+const defaultWorkerCapabilities = "code.change,ai.review"
+
 type setupFlowOptions struct {
 	ConfigPath     string
 	Base           tcworker.JoinOptions
@@ -30,60 +32,11 @@ type setupFlowOptions struct {
 }
 
 func runSetup(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("tc-worker setup", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	var options tcworker.JoinOptions
-	var skillPaths repeatedFlag
-	var configPath string
-	var plain bool
-	var yes bool
-	flags.StringVar(&configPath, "config", "", "worker config path; default is ~/.touch-connect/worker/config.json")
-	flags.StringVar(&options.ServerURL, "server-url", os.Getenv("TC_WORKER_SERVER_URL"), "tc-server URL")
-	flags.StringVar(&options.ServerURL, "server", os.Getenv("TC_WORKER_SERVER_URL"), "alias for --server-url")
-	flags.StringVar(&options.Backend, "backend", os.Getenv("TC_WORKER_BACKEND"), "AI CLI backend: auto, claude, codex, gemini, or kiro")
-	flags.StringVar(&options.Model, "model", os.Getenv("TC_WORKER_MODEL"), "model override")
-	flags.StringVar(&options.Command, "command", os.Getenv("TC_WORKER_AI_CLI_COMMAND"), "AI CLI command override")
-	rawArgs := flags.String("args", os.Getenv("TC_WORKER_AI_CLI_ARGS"), "comma-separated AI CLI args override")
-	flags.StringVar(&options.EndpointRef, "endpoint-ref", os.Getenv("TC_WORKER_ENDPOINT_REF"), "worker endpoint ref")
-	flags.StringVar(&options.EndpointRef, "endpoint", os.Getenv("TC_WORKER_ENDPOINT_REF"), "alias for --endpoint-ref")
-	flags.StringVar(&options.DisplayName, "display-name", os.Getenv("TC_WORKER_DISPLAY_NAME"), "worker display name")
-	flags.StringVar(&options.ActorID, "actor-id", os.Getenv("TC_WORKER_ACTOR_ID"), "worker actor id")
-	flags.StringVar(&options.WorkspaceID, "workspace-id", os.Getenv("TC_WORKER_WORKSPACE_ID"), "worker workspace id")
-	flags.StringVar(&options.Role, "role", os.Getenv("TC_WORKER_ROLE"), "worker role")
-	flags.StringVar(&options.Capabilities, "capabilities", os.Getenv("TC_WORKER_CAPABILITIES"), "comma-separated capabilities")
-	flags.StringVar(&options.Permission, "permission", os.Getenv("TC_WORKER_PERMISSION"), "permission profile")
-	flags.StringVar(&options.SkillsDir, "skills-dir", os.Getenv("TC_WORKER_SKILLS_DIR"), "directory containing SKILL.md files")
-	flags.Var(&skillPaths, "skill", "SKILL.md path; repeatable")
-	flags.StringVar(&options.WorkDir, "workdir", getenvDefault("TC_WORKER_AI_CLI_WORKDIR", os.Getenv("TC_WORKER_WORKDIR")), "AI CLI working directory")
-	flags.StringVar(&options.ArtifactDir, "artifact-dir", os.Getenv("TC_WORKER_ARTIFACT_DIR"), "artifact output directory")
-	flags.DurationVar(&options.Timeout, "timeout", durationFromEnv("TC_WORKER_AI_CLI_TIMEOUT"), "AI CLI execution timeout")
-	flags.DurationVar(&options.PollInterval, "poll-interval", durationFromEnv("TC_WORKER_POLL_INTERVAL"), "message poll interval")
-	flags.DurationVar(&options.HeartbeatInterval, "heartbeat-interval", durationFromEnv("TC_WORKER_HEARTBEAT_INTERVAL"), "endpoint heartbeat interval")
-	flags.StringVar(&options.Sandbox, "sandbox", getenvDefault("TC_WORKER_SANDBOX", "danger-full-access"), "backend sandbox/profile hint where supported")
-	flags.BoolVar(&plain, "plain", false, "disable interactive TUI-style chooser")
-	flags.BoolVar(&yes, "yes", false, "accept defaults without prompting")
-	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "usage: tc-worker setup [flags]")
-		fmt.Fprintln(flags.Output(), "")
-		fmt.Fprintln(flags.Output(), "creates ~/.touch-connect/worker/config.json and a default local worker SKILL.md")
-		flags.PrintDefaults()
-	}
-	if err := flags.Parse(args); err != nil {
-		if err == flag.ErrHelp {
-			return nil
-		}
+	parsed, err := parseSetupArgs(args)
+	if err != nil {
 		return err
 	}
-	options.Args = splitArgList(*rawArgs)
-	options.SkillPaths = skillPaths
-	config, path, err := runSetupFlow(ctx, setupFlowOptions{
-		ConfigPath:     configPath,
-		Base:           options,
-		AutoAccept:     yes,
-		Plain:          plain,
-		ConfirmLabel:   "Save worker config?",
-		NonInteractive: yes || !isInteractiveTerminal(),
-	})
+	config, path, err := runSetupFlow(ctx, parsed)
 	if err != nil {
 		return err
 	}
@@ -93,50 +46,127 @@ func runSetup(ctx context.Context, args []string) error {
 	return nil
 }
 
+func parseSetupArgs(args []string) (setupFlowOptions, error) {
+	flags := flag.NewFlagSet("tc-worker setup", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	var options tcworker.JoinOptions
+	var skillPaths repeatedFlag
+	var parsed setupFlowOptions
+	flags.StringVar(&parsed.ConfigPath, "config", "", "worker config path; default is ~/.touch-connect/worker/config.json")
+	flags.StringVar(&options.ServerURL, flagServerURL, os.Getenv("TC_WORKER_SERVER_URL"), "tc-server URL")
+	flags.StringVar(&options.ServerURL, "server", os.Getenv("TC_WORKER_SERVER_URL"), "alias for --server-url")
+	flags.StringVar(&options.Backend, "backend", os.Getenv("TC_WORKER_BACKEND"), "AI CLI backend: auto, claude, codex, gemini, or kiro")
+	flags.StringVar(&options.Model, "model", os.Getenv("TC_WORKER_MODEL"), "model override")
+	flags.StringVar(&options.Command, "command", os.Getenv("TC_WORKER_AI_CLI_COMMAND"), "AI CLI command override")
+	rawArgs := flags.String("args", os.Getenv("TC_WORKER_AI_CLI_ARGS"), "comma-separated AI CLI args override")
+	flags.StringVar(&options.EndpointRef, flagEndpointRef, os.Getenv("TC_WORKER_ENDPOINT_REF"), "worker endpoint ref")
+	flags.StringVar(&options.EndpointRef, "endpoint", os.Getenv("TC_WORKER_ENDPOINT_REF"), "alias for --endpoint-ref")
+	flags.StringVar(&options.DisplayName, "display-name", os.Getenv("TC_WORKER_DISPLAY_NAME"), "worker display name")
+	flags.StringVar(&options.ActorID, "actor-id", os.Getenv("TC_WORKER_ACTOR_ID"), "worker actor id")
+	flags.StringVar(&options.WorkspaceID, "workspace-id", os.Getenv("TC_WORKER_WORKSPACE_ID"), "worker workspace id")
+	flags.StringVar(&options.Role, "role", os.Getenv("TC_WORKER_ROLE"), "worker role")
+	flags.StringVar(&options.Capabilities, "capabilities", os.Getenv("TC_WORKER_CAPABILITIES"), "comma-separated capabilities")
+	flags.StringVar(&options.Permission, "permission", os.Getenv("TC_WORKER_PERMISSION"), "permission profile")
+	flags.StringVar(&options.SkillsDir, flagSkillsDir, os.Getenv("TC_WORKER_SKILLS_DIR"), "directory containing SKILL.md files")
+	flags.Var(&skillPaths, "skill", "SKILL.md path; repeatable")
+	flags.StringVar(&options.WorkDir, "workdir", getenvDefault("TC_WORKER_AI_CLI_WORKDIR", os.Getenv("TC_WORKER_WORKDIR")), "AI CLI working directory")
+	flags.StringVar(&options.ArtifactDir, "artifact-dir", os.Getenv("TC_WORKER_ARTIFACT_DIR"), "artifact output directory")
+	flags.DurationVar(&options.Timeout, "timeout", durationFromEnv("TC_WORKER_AI_CLI_TIMEOUT"), "AI CLI execution timeout")
+	flags.DurationVar(&options.PollInterval, "poll-interval", durationFromEnv("TC_WORKER_POLL_INTERVAL"), "message poll interval")
+	flags.DurationVar(&options.HeartbeatInterval, "heartbeat-interval", durationFromEnv("TC_WORKER_HEARTBEAT_INTERVAL"), "endpoint heartbeat interval")
+	flags.StringVar(&options.Sandbox, "sandbox", getenvDefault("TC_WORKER_SANDBOX", "danger-full-access"), "backend sandbox/profile hint where supported")
+	flags.BoolVar(&parsed.Plain, "plain", false, "disable interactive TUI-style chooser")
+	flags.BoolVar(&parsed.AutoAccept, "yes", false, "accept defaults without prompting")
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "usage: tc-worker setup [flags]")
+		fmt.Fprintln(flags.Output(), "")
+		fmt.Fprintln(flags.Output(), "creates ~/.touch-connect/worker/config.json and a default local worker SKILL.md")
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return setupFlowOptions{}, nil
+		}
+		return setupFlowOptions{}, err
+	}
+	options.Args = splitArgList(*rawArgs)
+	options.SkillPaths = skillPaths
+	parsed.Base = options
+	parsed.ConfirmLabel = "Save worker config?"
+	parsed.NonInteractive = parsed.AutoAccept || !isInteractiveTerminal()
+	return parsed, nil
+}
+
 func runSetupFlow(ctx context.Context, options setupFlowOptions) (tcworker.WorkerConfig, string, error) {
 	base := options.Base
 	base = applySetupDefaults(base)
-	needsBackendChooser := strings.TrimSpace(base.Command) == "" && (strings.TrimSpace(base.Backend) == "" || strings.EqualFold(base.Backend, tcworker.BackendAuto) || !options.NonInteractive)
-	if needsBackendChooser {
-		resolved, err := tcworker.RunJoinWizard(ctx, tcworker.JoinWizardOptions{
-			Input:        os.Stdin,
-			Output:       os.Stdout,
-			Base:         base,
-			AutoAccept:   options.AutoAccept,
-			UseTUI:       !options.Plain && !options.AutoAccept && isInteractiveTerminal(),
-			ConfirmLabel: options.ConfirmLabel,
-		})
+	base, err := chooseSetupBackend(ctx, base, options)
+	if err != nil {
+		return tcworker.WorkerConfig{}, "", err
+	}
+	base, err = promptSetupFields(base, options.NonInteractive)
+	if err != nil {
+		return tcworker.WorkerConfig{}, "", err
+	}
+	return persistWorkerConfig(base, options.ConfigPath)
+}
+
+func chooseSetupBackend(ctx context.Context, base tcworker.JoinOptions, options setupFlowOptions) (tcworker.JoinOptions, error) {
+	if !setupNeedsBackendChooser(base, options.NonInteractive) {
+		return base, nil
+	}
+	return tcworker.RunJoinWizard(ctx, tcworker.JoinWizardOptions{
+		Input:        os.Stdin,
+		Output:       os.Stdout,
+		Base:         base,
+		AutoAccept:   options.AutoAccept,
+		UseTUI:       !options.Plain && !options.AutoAccept && isInteractiveTerminal(),
+		ConfirmLabel: options.ConfirmLabel,
+	})
+}
+
+func setupNeedsBackendChooser(base tcworker.JoinOptions, nonInteractive bool) bool {
+	if strings.TrimSpace(base.Command) != "" {
+		return false
+	}
+	backend := strings.TrimSpace(base.Backend)
+	return backend == "" || strings.EqualFold(backend, tcworker.BackendAuto) || !nonInteractive
+}
+
+func promptSetupFields(base tcworker.JoinOptions, nonInteractive bool) (tcworker.JoinOptions, error) {
+	if nonInteractive {
+		return base, nil
+	}
+	reader := bufio.NewReader(os.Stdin)
+	for _, prompt := range setupPrompts() {
+		value, err := promptLineDefault(reader, os.Stdout, prompt.Label, prompt.Get(base))
 		if err != nil {
-			return tcworker.WorkerConfig{}, "", err
+			return tcworker.JoinOptions{}, err
 		}
-		base = resolved
+		prompt.Set(&base, value)
 	}
-	if !options.NonInteractive {
-		reader := bufio.NewReader(os.Stdin)
-		writer := os.Stdout
-		var err error
-		if base.ServerURL, err = promptLineDefault(reader, writer, "Server URL", base.ServerURL); err != nil {
-			return tcworker.WorkerConfig{}, "", err
-		}
-		if base.Role, err = promptLineDefault(reader, writer, "Worker role", base.Role); err != nil {
-			return tcworker.WorkerConfig{}, "", err
-		}
-		if base.Capabilities, err = promptLineDefault(reader, writer, "Capabilities", base.Capabilities); err != nil {
-			return tcworker.WorkerConfig{}, "", err
-		}
-		if base.Permission, err = promptLineDefault(reader, writer, "Permission", base.Permission); err != nil {
-			return tcworker.WorkerConfig{}, "", err
-		}
-		if base.SkillsDir, err = promptLineDefault(reader, writer, "Skills directory", base.SkillsDir); err != nil {
-			return tcworker.WorkerConfig{}, "", err
-		}
-		if base.WorkDir, err = promptLineDefault(reader, writer, "Workspace directory", base.WorkDir); err != nil {
-			return tcworker.WorkerConfig{}, "", err
-		}
-		if base.ArtifactDir, err = promptLineDefault(reader, writer, "Artifact directory", base.ArtifactDir); err != nil {
-			return tcworker.WorkerConfig{}, "", err
-		}
+	return base, nil
+}
+
+type setupPrompt struct {
+	Label string
+	Get   func(tcworker.JoinOptions) string
+	Set   func(*tcworker.JoinOptions, string)
+}
+
+func setupPrompts() []setupPrompt {
+	return []setupPrompt{
+		{"Server URL", func(o tcworker.JoinOptions) string { return o.ServerURL }, func(o *tcworker.JoinOptions, v string) { o.ServerURL = v }},
+		{"Worker role", func(o tcworker.JoinOptions) string { return o.Role }, func(o *tcworker.JoinOptions, v string) { o.Role = v }},
+		{"Capabilities", func(o tcworker.JoinOptions) string { return o.Capabilities }, func(o *tcworker.JoinOptions, v string) { o.Capabilities = v }},
+		{"Permission", func(o tcworker.JoinOptions) string { return o.Permission }, func(o *tcworker.JoinOptions, v string) { o.Permission = v }},
+		{"Skills directory", func(o tcworker.JoinOptions) string { return o.SkillsDir }, func(o *tcworker.JoinOptions, v string) { o.SkillsDir = v }},
+		{"Workspace directory", func(o tcworker.JoinOptions) string { return o.WorkDir }, func(o *tcworker.JoinOptions, v string) { o.WorkDir = v }},
+		{"Artifact directory", func(o tcworker.JoinOptions) string { return o.ArtifactDir }, func(o *tcworker.JoinOptions, v string) { o.ArtifactDir = v }},
 	}
+}
+
+func persistWorkerConfig(base tcworker.JoinOptions, configPath string) (tcworker.WorkerConfig, string, error) {
 	config, err := tcworker.WorkerConfigFromJoinOptions(base)
 	if err != nil {
 		return tcworker.WorkerConfig{}, "", err
@@ -144,7 +174,7 @@ func runSetupFlow(ctx context.Context, options setupFlowOptions) (tcworker.Worke
 	if err := tcworker.EnsureDefaultWorkerSkill(config.SkillsDir, config.Capabilities); err != nil {
 		return tcworker.WorkerConfig{}, "", err
 	}
-	path := options.ConfigPath
+	path := configPath
 	if strings.TrimSpace(path) == "" {
 		path, err = tcworker.DefaultWorkerConfigPath()
 		if err != nil {
@@ -168,25 +198,19 @@ func applySetupDefaults(options tcworker.JoinOptions) tcworker.JoinOptions {
 		options.Role = tcworker.DefaultWorkerRole
 	}
 	if strings.TrimSpace(options.Capabilities) == "" {
-		options.Capabilities = "code.change,ai.review"
+		options.Capabilities = defaultWorkerCapabilities
 	}
 	if strings.TrimSpace(options.Permission) == "" {
 		options.Permission = tcworker.DefaultWorkerPermission
 	}
 	if strings.TrimSpace(options.WorkDir) == "" {
-		if wd, err := os.Getwd(); err == nil {
-			options.WorkDir = wd
-		}
+		options.WorkDir = defaultWorkDir()
 	}
 	if strings.TrimSpace(options.SkillsDir) == "" && len(options.SkillPaths) == 0 {
-		if skillsDir, err := tcworker.DefaultWorkerSkillsDir(); err == nil {
-			options.SkillsDir = skillsDir
-		}
+		options.SkillsDir = defaultSkillsDir()
 	}
 	if strings.TrimSpace(options.ArtifactDir) == "" {
-		if artifactDir, err := tcworker.DefaultWorkerArtifactDir(); err == nil {
-			options.ArtifactDir = artifactDir
-		}
+		options.ArtifactDir = defaultArtifactDir()
 	}
 	if options.Timeout == 0 {
 		options.Timeout = 10 * time.Minute
@@ -201,6 +225,30 @@ func applySetupDefaults(options tcworker.JoinOptions) tcworker.JoinOptions {
 		options.Sandbox = "danger-full-access"
 	}
 	return options
+}
+
+func defaultWorkDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return wd
+}
+
+func defaultSkillsDir() string {
+	skillsDir, err := tcworker.DefaultWorkerSkillsDir()
+	if err != nil {
+		return ""
+	}
+	return skillsDir
+}
+
+func defaultArtifactDir() string {
+	artifactDir, err := tcworker.DefaultWorkerArtifactDir()
+	if err != nil {
+		return ""
+	}
+	return artifactDir
 }
 
 func promptLineDefault(reader *bufio.Reader, writer io.Writer, label string, fallback string) (string, error) {

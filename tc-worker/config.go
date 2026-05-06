@@ -222,11 +222,32 @@ func WorkerConfigFromJoinOptions(options JoinOptions) (WorkerConfig, error) {
 }
 
 func (c WorkerConfig) withDefaults() (WorkerConfig, error) {
+	c = defaultWorkerConfigScalars(c)
+	if !supportedWorkerConfigVersion(c.Version) {
+		return WorkerConfig{}, errors.New("unsupported worker config version")
+	}
+	var err error
+	if c.SkillsDir, err = defaultConfigSkillsDir(c.SkillsDir, c.SkillPaths); err != nil {
+		return WorkerConfig{}, err
+	}
+	if c.WorkDir, err = defaultConfigWorkDir(c.WorkDir); err != nil {
+		return WorkerConfig{}, err
+	}
+	if c.ArtifactDir, err = defaultConfigArtifactDir(c.ArtifactDir); err != nil {
+		return WorkerConfig{}, err
+	}
+	c.SkillsDir = expandHome(c.SkillsDir)
+	c.WorkDir = expandHome(c.WorkDir)
+	c.ArtifactDir = expandHome(c.ArtifactDir)
+	for index, path := range c.SkillPaths {
+		c.SkillPaths[index] = expandHome(path)
+	}
+	return c, nil
+}
+
+func defaultWorkerConfigScalars(c WorkerConfig) WorkerConfig {
 	if c.Version == 0 {
 		c.Version = WorkerConfigVersion
-	}
-	if c.Version != WorkerConfigVersion {
-		return WorkerConfig{}, errors.New("unsupported worker config version")
 	}
 	if strings.TrimSpace(c.ServerURL) == "" {
 		c.ServerURL = "http://127.0.0.1:8080"
@@ -244,37 +265,35 @@ func (c WorkerConfig) withDefaults() (WorkerConfig, error) {
 	if strings.TrimSpace(c.Permission) == "" {
 		c.Permission = DefaultWorkerPermission
 	}
-	if strings.TrimSpace(c.SkillsDir) == "" && len(c.SkillPaths) == 0 {
-		skillsDir, err := DefaultWorkerSkillsDir()
-		if err != nil {
-			return WorkerConfig{}, err
-		}
-		c.SkillsDir = skillsDir
-	}
-	if strings.TrimSpace(c.WorkDir) == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return WorkerConfig{}, err
-		}
-		c.WorkDir = wd
-	}
-	if strings.TrimSpace(c.ArtifactDir) == "" {
-		artifactDir, err := DefaultWorkerArtifactDir()
-		if err != nil {
-			return WorkerConfig{}, err
-		}
-		c.ArtifactDir = artifactDir
-	}
 	if strings.TrimSpace(c.Sandbox) == "" {
 		c.Sandbox = "danger-full-access"
 	}
-	c.SkillsDir = expandHome(c.SkillsDir)
-	c.WorkDir = expandHome(c.WorkDir)
-	c.ArtifactDir = expandHome(c.ArtifactDir)
-	for index, path := range c.SkillPaths {
-		c.SkillPaths[index] = expandHome(path)
+	return c
+}
+
+func supportedWorkerConfigVersion(version int) bool {
+	return version == WorkerConfigVersion
+}
+
+func defaultConfigSkillsDir(current string, skillPaths []string) (string, error) {
+	if strings.TrimSpace(current) != "" || len(skillPaths) > 0 {
+		return current, nil
 	}
-	return c, nil
+	return DefaultWorkerSkillsDir()
+}
+
+func defaultConfigWorkDir(current string) (string, error) {
+	if strings.TrimSpace(current) != "" {
+		return current, nil
+	}
+	return os.Getwd()
+}
+
+func defaultConfigArtifactDir(current string) (string, error) {
+	if strings.TrimSpace(current) != "" {
+		return current, nil
+	}
+	return DefaultWorkerArtifactDir()
 }
 
 func parseOptionalDuration(value string) (time.Duration, error) {

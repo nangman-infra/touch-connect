@@ -22,18 +22,27 @@ func handoffContextFromSnapshot(claim contracts.ClaimMessageResponse, snapshot c
 	referencedMessages, referencedArtifacts := referencedHandoffRefs(claim.Payload.References)
 	messageRefs := map[string]struct{}{}
 	context := HandoffContext{TaskRef: taskRef}
+	context.Messages = handoffMessagesFromSnapshot(claim, snapshot, taskRef, referencedMessages, messageRefs)
+	context.Artifacts = handoffArtifactsFromSnapshot(snapshot, referencedArtifacts, messageRefs)
+	if context.TaskRef == "" && len(context.Messages) == 0 && len(context.Artifacts) == 0 {
+		return HandoffContext{}
+	}
+	return context
+}
+
+func handoffMessagesFromSnapshot(
+	claim contracts.ClaimMessageResponse,
+	snapshot contracts.SnapshotResponse,
+	taskRef string,
+	referencedMessages map[string]struct{},
+	messageRefs map[string]struct{},
+) []HandoffMessage {
+	messages := make([]HandoffMessage, 0)
 	for _, message := range snapshot.Messages {
-		if message.MessageRef == claim.MessageRef {
+		if !includeHandoffMessage(claim.MessageRef, taskRef, referencedMessages, message) {
 			continue
 		}
-		_, directlyReferenced := referencedMessages[message.MessageRef]
-		if !directlyReferenced && !sameHandoffTask(taskRef, message) {
-			continue
-		}
-		if message.State != "completed" {
-			continue
-		}
-		context.Messages = append(context.Messages, HandoffMessage{
+		messages = append(messages, HandoffMessage{
 			MessageRef:       message.MessageRef,
 			TargetCapability: message.TargetCapability,
 			State:            message.State,
@@ -43,28 +52,48 @@ func handoffContextFromSnapshot(claim contracts.ClaimMessageResponse, snapshot c
 			Body:             trimPromptField(message.Payload.Body),
 		})
 		messageRefs[message.MessageRef] = struct{}{}
-		if len(context.Messages) >= maxHandoffMessages {
+		if len(messages) >= maxHandoffMessages {
 			break
 		}
 	}
+	return messages
+}
+
+func includeHandoffMessage(currentMessageRef string, taskRef string, referencedMessages map[string]struct{}, message contracts.MessageRecord) bool {
+	if message.MessageRef == currentMessageRef || message.State != "completed" {
+		return false
+	}
+	_, directlyReferenced := referencedMessages[message.MessageRef]
+	return directlyReferenced || sameHandoffTask(taskRef, message)
+}
+
+func handoffArtifactsFromSnapshot(
+	snapshot contracts.SnapshotResponse,
+	referencedArtifacts map[string]struct{},
+	messageRefs map[string]struct{},
+) []HandoffArtifact {
+	artifacts := make([]HandoffArtifact, 0)
 	for _, artifact := range snapshot.Artifacts {
-		_, messageMatched := messageRefs[artifact.MessageRef]
-		_, artifactMatched := referencedArtifacts[artifact.ArtifactVersionRef]
-		if !artifactMatched {
-			_, artifactMatched = referencedArtifacts[artifact.ArtifactRef]
-		}
-		if !messageMatched && !artifactMatched {
+		if !includeHandoffArtifact(artifact, referencedArtifacts, messageRefs) {
 			continue
 		}
-		context.Artifacts = append(context.Artifacts, handoffArtifactFromRecord(artifact))
-		if len(context.Artifacts) >= maxHandoffArtifacts {
+		artifacts = append(artifacts, handoffArtifactFromRecord(artifact))
+		if len(artifacts) >= maxHandoffArtifacts {
 			break
 		}
 	}
-	if context.TaskRef == "" && len(context.Messages) == 0 && len(context.Artifacts) == 0 {
-		return HandoffContext{}
-	}
-	return context
+	return artifacts
+}
+
+func includeHandoffArtifact(
+	artifact contracts.ArtifactRecord,
+	referencedArtifacts map[string]struct{},
+	messageRefs map[string]struct{},
+) bool {
+	_, messageMatched := messageRefs[artifact.MessageRef]
+	_, versionMatched := referencedArtifacts[artifact.ArtifactVersionRef]
+	_, artifactMatched := referencedArtifacts[artifact.ArtifactRef]
+	return messageMatched || versionMatched || artifactMatched
 }
 
 func referencedHandoffRefs(references []contracts.Reference) (map[string]struct{}, map[string]struct{}) {

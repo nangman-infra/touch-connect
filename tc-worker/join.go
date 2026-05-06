@@ -118,6 +118,20 @@ func BuildJoinEnvironment(options JoinOptions) (JoinEnvironment, error) {
 }
 
 func (o JoinOptions) withDefaults() (JoinOptions, error) {
+	var err error
+	if o, err = o.defaultServerAndBackend(); err != nil {
+		return JoinOptions{}, err
+	}
+	if o, err = o.defaultPaths(); err != nil {
+		return JoinOptions{}, err
+	}
+	if o, err = o.defaultIdentityAndTiming(); err != nil {
+		return JoinOptions{}, err
+	}
+	return o, nil
+}
+
+func (o JoinOptions) defaultServerAndBackend() (JoinOptions, error) {
 	if strings.TrimSpace(o.ServerURL) == "" {
 		o.ServerURL = "http://127.0.0.1:8080"
 	}
@@ -132,47 +146,87 @@ func (o JoinOptions) withDefaults() (JoinOptions, error) {
 		}
 		o.Backend = selected
 	}
-	if o.WorkDir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return JoinOptions{}, err
-		}
-		o.WorkDir = wd
-	}
-	workDir, err := filepath.Abs(o.WorkDir)
+	return o, nil
+}
+
+func (o JoinOptions) defaultPaths() (JoinOptions, error) {
+	workDir, err := resolveJoinWorkDir(o.WorkDir)
 	if err != nil {
 		return JoinOptions{}, err
 	}
 	o.WorkDir = workDir
-	if o.SkillsDir == "" && len(o.SkillPaths) == 0 {
-		defaultSkillsDir := filepath.Join(o.WorkDir, "examples", "skills")
-		if _, err := os.Stat(defaultSkillsDir); err == nil {
-			o.SkillsDir = defaultSkillsDir
-		}
-	}
-	if o.SkillsDir != "" {
-		o.SkillsDir, err = filepath.Abs(o.SkillsDir)
-		if err != nil {
-			return JoinOptions{}, err
-		}
-	}
-	for index, path := range o.SkillPaths {
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			return JoinOptions{}, err
-		}
-		o.SkillPaths[index] = absolute
-	}
-	if o.SkillsDir == "" && len(o.SkillPaths) == 0 {
-		return JoinOptions{}, errors.New("worker join requires --skills-dir or --skill")
-	}
-	if o.ArtifactDir == "" {
-		o.ArtifactDir = filepath.Join(o.WorkDir, ".touch-connect", "workers", safeJoinPart(o.Backend), "artifacts")
-	}
-	o.ArtifactDir, err = filepath.Abs(o.ArtifactDir)
+
+	o.SkillsDir, err = resolveJoinSkillsDir(o.SkillsDir, o.SkillPaths, o.WorkDir)
 	if err != nil {
 		return JoinOptions{}, err
 	}
+	o.SkillPaths, err = absoluteJoinSkillPaths(o.SkillPaths)
+	if err != nil {
+		return JoinOptions{}, err
+	}
+	if joinHasNoSkills(o) {
+		return JoinOptions{}, errors.New("worker join requires --skills-dir or --skill")
+	}
+
+	o.ArtifactDir, err = resolveJoinArtifactDir(o.ArtifactDir, o.WorkDir, o.Backend)
+	if err != nil {
+		return JoinOptions{}, err
+	}
+	return o, nil
+}
+
+func resolveJoinWorkDir(path string) (string, error) {
+	if path == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		path = wd
+	}
+	return filepath.Abs(path)
+}
+
+func resolveJoinSkillsDir(skillsDir string, skillPaths []string, workDir string) (string, error) {
+	if skillsDir == "" && len(skillPaths) == 0 {
+		skillsDir = existingDefaultJoinSkillsDir(workDir)
+	}
+	if skillsDir == "" {
+		return "", nil
+	}
+	return filepath.Abs(skillsDir)
+}
+
+func existingDefaultJoinSkillsDir(workDir string) string {
+	defaultSkillsDir := filepath.Join(workDir, "examples", "skills")
+	if _, err := os.Stat(defaultSkillsDir); err == nil {
+		return defaultSkillsDir
+	}
+	return ""
+}
+
+func absoluteJoinSkillPaths(paths []string) ([]string, error) {
+	for index, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		paths[index] = absolute
+	}
+	return paths, nil
+}
+
+func joinHasNoSkills(o JoinOptions) bool {
+	return o.SkillsDir == "" && len(o.SkillPaths) == 0
+}
+
+func resolveJoinArtifactDir(artifactDir string, workDir string, backend string) (string, error) {
+	if artifactDir == "" {
+		artifactDir = filepath.Join(workDir, ".touch-connect", "workers", safeJoinPart(backend), "artifacts")
+	}
+	return filepath.Abs(artifactDir)
+}
+
+func (o JoinOptions) defaultIdentityAndTiming() (JoinOptions, error) {
 	if o.EndpointRef == "" {
 		o.EndpointRef = "tc://endpoint/" + safeJoinPart(o.Backend) + "_worker"
 	}

@@ -40,78 +40,56 @@ type JoinWizardOptions struct {
 }
 
 func RunJoinWizard(ctx context.Context, options JoinWizardOptions) (JoinOptions, error) {
-	input := options.Input
-	if input == nil {
-		input = strings.NewReader("")
-	}
-	output := options.Output
-	if output == nil {
-		output = io.Discard
-	}
-	lookPath := options.LookPath
-	if lookPath == nil {
-		lookPath = exec.LookPath
-	}
-	authProbe := options.AuthProbe
-	if authProbe == nil {
-		authProbe = probeBackendAuth
-	}
-	candidates := detectBackendCandidates(ctx, lookPath, authProbe)
+	options = normalizedJoinWizardOptions(options)
+	candidates := detectBackendCandidates(ctx, options.LookPath, options.AuthProbe)
 	usable := usableBackendCandidates(candidates)
 	if len(usable) == 0 {
-		printBackendCandidates(output, candidates)
+		printBackendCandidates(options.Output, candidates)
 		return JoinOptions{}, errors.New("no installed AI CLI backend found; install Claude Code, Codex, Gemini, or Kiro CLI first")
 	}
 	if options.UseTUI && !options.AutoAccept {
 		return runJoinWizardTUI(ctx, options, candidates, usable)
 	}
+	return runTextJoinWizard(options, candidates, usable)
+}
 
-	reader := bufio.NewReader(input)
+func normalizedJoinWizardOptions(options JoinWizardOptions) JoinWizardOptions {
+	if options.Input == nil {
+		options.Input = strings.NewReader("")
+	}
+	if options.Output == nil {
+		options.Output = io.Discard
+	}
+	if options.LookPath == nil {
+		options.LookPath = exec.LookPath
+	}
+	if options.AuthProbe == nil {
+		options.AuthProbe = probeBackendAuth
+	}
+	if strings.TrimSpace(options.ConfirmLabel) == "" {
+		options.ConfirmLabel = "Start worker?"
+	}
+	return options
+}
+
+func runTextJoinWizard(options JoinWizardOptions, candidates []BackendCandidate, usable []BackendCandidate) (JoinOptions, error) {
+	reader := bufio.NewReader(options.Input)
+	output := options.Output
 	fmt.Fprintln(output, "touch-connect worker join")
 	fmt.Fprintln(output, "")
 	printBackendCandidates(output, candidates)
 	fmt.Fprintln(output, "")
 	printUsableBackendChoices(output, usable)
-	selected := usable[0]
-	if !options.AutoAccept {
-		index, err := promptChoice(reader, output, "Select AI worker", len(usable), 1)
-		if err != nil {
-			return JoinOptions{}, err
-		}
-		selected = usable[index-1]
+	selected, err := selectWizardBackend(reader, output, usable, options.AutoAccept)
+	if err != nil {
+		return JoinOptions{}, err
+	}
+	model, err := selectWizardModel(reader, output, selected.Backend, options.Base.Model, options.AutoAccept)
+	if err != nil {
+		return JoinOptions{}, err
 	}
 
-	model := options.Base.Model
-	models := modelChoicesForBackend(selected.Backend)
-	if model == "" && len(models) > 0 {
-		model = models[0].Value
-	}
-	if !options.AutoAccept && len(models) > 1 {
-		fmt.Fprintln(output, "")
-		printModelChoices(output, models)
-		index, err := promptChoice(reader, output, "Select model", len(models), 1)
-		if err != nil {
-			return JoinOptions{}, err
-		}
-		model = models[index-1].Value
-		if model == "__custom__" {
-			custom, err := promptLine(reader, output, "Custom model")
-			if err != nil {
-				return JoinOptions{}, err
-			}
-			model = strings.TrimSpace(custom)
-			if model == "" {
-				model = models[0].Value
-			}
-		}
-	}
-
-	result := options.Base
-	result.Backend = selected.Backend
-	result.Model = model
-	if result.Command == "" {
-		result.Command = selected.CommandPath
-	}
+	result := wizardResult(options.Base, selected, model)
 	fmt.Fprintln(output, "")
 	fmt.Fprintln(output, "Worker summary")
 	fmt.Fprintf(output, "  backend:    %s\n", selected.DisplayName)
@@ -119,20 +97,79 @@ func RunJoinWizard(ctx context.Context, options JoinWizardOptions) (JoinOptions,
 	fmt.Fprintf(output, "  command:    %s\n", result.Command)
 	fmt.Fprintf(output, "  server:     %s\n", defaultString(result.ServerURL, "http://127.0.0.1:8080"))
 	fmt.Fprintf(output, "  permission: %s\n", defaultString(result.Permission, DefaultWorkerPermission))
-	if !options.AutoAccept {
-		label := options.ConfirmLabel
-		if strings.TrimSpace(label) == "" {
-			label = "Start worker?"
-		}
-		confirmed, err := promptConfirm(reader, output, label, true)
-		if err != nil {
-			return JoinOptions{}, err
-		}
-		if !confirmed {
-			return JoinOptions{}, errors.New("worker join cancelled")
-		}
+	if err := confirmJoinWizard(reader, output, options); err != nil {
+		return JoinOptions{}, err
 	}
 	return result, nil
+}
+
+func selectWizardBackend(reader *bufio.Reader, output io.Writer, usable []BackendCandidate, autoAccept bool) (BackendCandidate, error) {
+	if autoAccept {
+		return usable[0], nil
+	}
+	index, err := promptChoice(reader, output, "Select AI worker", len(usable), 1)
+	if err != nil {
+		return BackendCandidate{}, err
+	}
+	return usable[index-1], nil
+}
+
+func selectWizardModel(reader *bufio.Reader, output io.Writer, backend string, initial string, autoAccept bool) (string, error) {
+	choices := modelChoicesForBackend(backend)
+	model := initial
+	if model == "" && len(choices) > 0 {
+		model = choices[0].Value
+	}
+	if autoAccept || len(choices) <= 1 {
+		return model, nil
+	}
+	fmt.Fprintln(output, "")
+	printModelChoices(output, choices)
+	index, err := promptChoice(reader, output, "Select model", len(choices), 1)
+	if err != nil {
+		return "", err
+	}
+	selected := choices[index-1].Value
+	if selected != "__custom__" {
+		return selected, nil
+	}
+	return promptCustomModel(reader, output, choices[0].Value)
+}
+
+func promptCustomModel(reader *bufio.Reader, output io.Writer, fallback string) (string, error) {
+	custom, err := promptLine(reader, output, "Custom model")
+	if err != nil {
+		return "", err
+	}
+	model := strings.TrimSpace(custom)
+	if model == "" {
+		return fallback, nil
+	}
+	return model, nil
+}
+
+func wizardResult(base JoinOptions, selected BackendCandidate, model string) JoinOptions {
+	result := base
+	result.Backend = selected.Backend
+	result.Model = model
+	if result.Command == "" {
+		result.Command = selected.CommandPath
+	}
+	return result
+}
+
+func confirmJoinWizard(reader *bufio.Reader, output io.Writer, options JoinWizardOptions) error {
+	if options.AutoAccept {
+		return nil
+	}
+	confirmed, err := promptConfirm(reader, output, options.ConfirmLabel, true)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return errors.New("worker join cancelled")
+	}
+	return nil
 }
 
 func DetectJoinBackends(ctx context.Context) []BackendCandidate {

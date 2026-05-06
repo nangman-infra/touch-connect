@@ -20,56 +20,76 @@ var (
 	commit  = "unknown"
 )
 
+const (
+	flagServerURL   = "server-url"
+	flagEndpointRef = "endpoint-ref"
+	flagSkillsDir   = "skills-dir"
+)
+
+type rootCommand func(context.Context, []string) error
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "join":
-			if err := runJoin(ctx, os.Args[2:]); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "setup":
-			if err := runSetup(ctx, os.Args[2:]); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "doctor":
-			if err := runDoctor(ctx, os.Args[2:]); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "install":
-			if err := runInstallOrUpdate(ctx, "install", os.Args[2:]); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "update":
-			if err := runInstallOrUpdate(ctx, "update", os.Args[2:]); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "uninstall":
-			if err := runUninstall(os.Args[2:]); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "version":
-			writeVersion(os.Stdout)
-			return
-		case "help", "-h", "--help":
-			writeUsage(os.Stdout)
-			return
-		}
-		if os.Args[1] == "--version" || os.Args[1] == "-version" {
-			writeVersion(os.Stdout)
-			return
-		}
-	}
-	if err := runEnvWorker(ctx); err != nil {
+	if err := runRoot(ctx, os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runRoot(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return runEnvWorker(ctx)
+	}
+	if isVersionArg(args[0]) {
+		writeVersion(os.Stdout)
+		return nil
+	}
+	command, ok := rootCommands()[args[0]]
+	if !ok {
+		return runEnvWorker(ctx)
+	}
+	return command(ctx, args[1:])
+}
+
+func rootCommands() map[string]rootCommand {
+	return map[string]rootCommand{
+		"join":    runJoin,
+		"setup":   runSetup,
+		"doctor":  runDoctor,
+		"install": installWorker,
+		"update":  updateWorker,
+		"uninstall": func(_ context.Context, args []string) error {
+			return runUninstall(args)
+		},
+		"version": func(_ context.Context, _ []string) error {
+			writeVersion(os.Stdout)
+			return nil
+		},
+		"help": func(_ context.Context, _ []string) error {
+			writeUsage(os.Stdout)
+			return nil
+		},
+		"-h": func(_ context.Context, _ []string) error {
+			writeUsage(os.Stdout)
+			return nil
+		},
+		"--help": func(_ context.Context, _ []string) error {
+			writeUsage(os.Stdout)
+			return nil
+		},
+	}
+}
+
+func isVersionArg(arg string) bool {
+	return arg == "--version" || arg == "-version"
+}
+
+func installWorker(ctx context.Context, args []string) error {
+	return runInstallOrUpdate(ctx, "install", args)
+}
+
+func updateWorker(ctx context.Context, args []string) error {
+	return runInstallOrUpdate(ctx, "update", args)
 }
 
 func runEnvWorker(ctx context.Context) error {
@@ -94,25 +114,60 @@ func runEnvWorker(ctx context.Context) error {
 }
 
 func runJoin(ctx context.Context, args []string) error {
+	parsed, err := parseJoinArgs(args)
+	if err != nil {
+		return err
+	}
+	base, err := resolveJoinOptions(ctx, parsed)
+	if err != nil {
+		return err
+	}
+	if parsed.Wizard {
+		base, err = runExplicitJoinWizard(ctx, base, parsed)
+		if err != nil {
+			return err
+		}
+	}
+	env, err := tcworker.BuildJoinEnvironment(base)
+	if err != nil {
+		return err
+	}
+	if err := applyJoinEnvironment(env); err != nil {
+		return err
+	}
+	if parsed.DryRun {
+		printJoinDryRun(env)
+		return nil
+	}
+	return startJoinedWorker(ctx, env, parsed.Plain)
+}
+
+type joinRunOptions struct {
+	ConfigPath string
+	Setup      bool
+	Wizard     bool
+	Plain      bool
+	Yes        bool
+	DryRun     bool
+	Visited    map[string]bool
+	Options    tcworker.JoinOptions
+}
+
+func parseJoinArgs(args []string) (joinRunOptions, error) {
 	flags := flag.NewFlagSet("tc-worker join", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	var options tcworker.JoinOptions
+	var parsed joinRunOptions
 	var skillPaths repeatedFlag
-	var configPath string
-	var setup bool
-	var wizard bool
-	var plain bool
-	var yes bool
-	var dryRun bool
-	flags.StringVar(&configPath, "config", "", "worker config path; default is ~/.touch-connect/worker/config.json")
-	flags.BoolVar(&setup, "setup", false, "run setup before joining when config is missing")
-	flags.StringVar(&options.ServerURL, "server-url", os.Getenv("TC_WORKER_SERVER_URL"), "tc-server URL")
+	options := &parsed.Options
+	flags.StringVar(&parsed.ConfigPath, "config", "", "worker config path; default is ~/.touch-connect/worker/config.json")
+	flags.BoolVar(&parsed.Setup, "setup", false, "run setup before joining when config is missing")
+	flags.StringVar(&options.ServerURL, flagServerURL, os.Getenv("TC_WORKER_SERVER_URL"), "tc-server URL")
 	flags.StringVar(&options.ServerURL, "server", os.Getenv("TC_WORKER_SERVER_URL"), "alias for --server-url")
 	flags.StringVar(&options.Backend, "backend", os.Getenv("TC_WORKER_BACKEND"), "AI CLI backend: auto, claude, codex, gemini, or kiro")
 	flags.StringVar(&options.Model, "model", os.Getenv("TC_WORKER_MODEL"), "model override passed to the selected backend")
 	flags.StringVar(&options.Command, "command", os.Getenv("TC_WORKER_AI_CLI_COMMAND"), "AI CLI command override")
 	rawArgs := flags.String("args", os.Getenv("TC_WORKER_AI_CLI_ARGS"), "comma-separated AI CLI args override")
-	flags.StringVar(&options.EndpointRef, "endpoint-ref", os.Getenv("TC_WORKER_ENDPOINT_REF"), "worker endpoint ref")
+	flags.StringVar(&options.EndpointRef, flagEndpointRef, os.Getenv("TC_WORKER_ENDPOINT_REF"), "worker endpoint ref")
 	flags.StringVar(&options.EndpointRef, "endpoint", os.Getenv("TC_WORKER_ENDPOINT_REF"), "alias for --endpoint-ref")
 	flags.StringVar(&options.DisplayName, "display-name", os.Getenv("TC_WORKER_DISPLAY_NAME"), "worker display name")
 	flags.StringVar(&options.ActorID, "actor-id", os.Getenv("TC_WORKER_ACTOR_ID"), "worker actor id")
@@ -120,7 +175,7 @@ func runJoin(ctx context.Context, args []string) error {
 	flags.StringVar(&options.Role, "role", os.Getenv("TC_WORKER_ROLE"), "human-assigned worker role, for example code-worker or reviewer")
 	flags.StringVar(&options.Capabilities, "capabilities", os.Getenv("TC_WORKER_CAPABILITIES"), "comma-separated capability filter")
 	flags.StringVar(&options.Permission, "permission", os.Getenv("TC_WORKER_PERMISSION"), "permission profile: auto-approve or manual")
-	flags.StringVar(&options.SkillsDir, "skills-dir", os.Getenv("TC_WORKER_SKILLS_DIR"), "directory containing SKILL.md files")
+	flags.StringVar(&options.SkillsDir, flagSkillsDir, os.Getenv("TC_WORKER_SKILLS_DIR"), "directory containing SKILL.md files")
 	flags.Var(&skillPaths, "skill", "SKILL.md path; repeatable")
 	flags.StringVar(&options.WorkDir, "workdir", getenvDefault("TC_WORKER_AI_CLI_WORKDIR", os.Getenv("TC_WORKER_WORKDIR")), "AI CLI working directory")
 	flags.StringVar(&options.ArtifactDir, "artifact-dir", os.Getenv("TC_WORKER_ARTIFACT_DIR"), "artifact output directory")
@@ -129,10 +184,10 @@ func runJoin(ctx context.Context, args []string) error {
 	flags.DurationVar(&options.HeartbeatInterval, "heartbeat-interval", durationFromEnv("TC_WORKER_HEARTBEAT_INTERVAL"), "endpoint heartbeat interval")
 	flags.IntVar(&options.MaxMessages, "max-messages", intFromEnv("TC_WORKER_MAX_MESSAGES"), "stop after processing this many messages; 0 means run until interrupted")
 	flags.StringVar(&options.Sandbox, "sandbox", getenvDefault("TC_WORKER_SANDBOX", "danger-full-access"), "backend sandbox/profile hint where supported")
-	flags.BoolVar(&wizard, "wizard", false, "choose an installed AI CLI backend and model interactively without saving config")
-	flags.BoolVar(&plain, "plain", false, "disable the worker TUI and use plain text prompts/logs")
-	flags.BoolVar(&yes, "yes", false, "accept setup or wizard defaults without prompting")
-	flags.BoolVar(&dryRun, "dry-run", false, "print resolved worker environment and exit")
+	flags.BoolVar(&parsed.Wizard, "wizard", false, "choose an installed AI CLI backend and model interactively without saving config")
+	flags.BoolVar(&parsed.Plain, "plain", false, "disable the worker TUI and use plain text prompts/logs")
+	flags.BoolVar(&parsed.Yes, "yes", false, "accept setup or wizard defaults without prompting")
+	flags.BoolVar(&parsed.DryRun, "dry-run", false, "print resolved worker environment and exit")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "usage: tc-worker join [flags]")
 		fmt.Fprintln(flags.Output(), "")
@@ -145,48 +200,44 @@ func runJoin(ctx context.Context, args []string) error {
 	}
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
-			return nil
+			return joinRunOptions{}, nil
 		}
-		return err
+		return joinRunOptions{}, err
 	}
-	visited := visitedFlags(flags)
+	parsed.Visited = visitedFlags(flags)
 	options.Args = splitArgList(*rawArgs)
 	options.SkillPaths = skillPaths
+	return parsed, nil
+}
 
-	base, err := resolveJoinOptions(ctx, configPath, setup, wizard, plain, yes, visited, options)
-	if err != nil {
-		return err
-	}
-	if wizard {
-		useWizardTUI := !plain && !yes && isInteractiveTerminal()
-		base, err = tcworker.RunJoinWizard(ctx, tcworker.JoinWizardOptions{
-			Input:        os.Stdin,
-			Output:       os.Stdout,
-			Base:         base,
-			AutoAccept:   yes,
-			UseTUI:       useWizardTUI,
-			ConfirmLabel: "Start worker?",
-		})
-		if err != nil {
-			return err
-		}
-	}
-	env, err := tcworker.BuildJoinEnvironment(base)
-	if err != nil {
-		return err
-	}
+func runExplicitJoinWizard(ctx context.Context, base tcworker.JoinOptions, parsed joinRunOptions) (tcworker.JoinOptions, error) {
+	return tcworker.RunJoinWizard(ctx, tcworker.JoinWizardOptions{
+		Input:        os.Stdin,
+		Output:       os.Stdout,
+		Base:         base,
+		AutoAccept:   parsed.Yes,
+		UseTUI:       !parsed.Plain && !parsed.Yes && isInteractiveTerminal(),
+		ConfirmLabel: "Start worker?",
+	})
+}
+
+func applyJoinEnvironment(env tcworker.JoinEnvironment) error {
 	for key, value := range env.Env {
 		if err := os.Setenv(key, value); err != nil {
 			return err
 		}
 	}
-	if dryRun {
-		fmt.Printf("backend=%s\nmodel=%s\ncommand=%s\nargs=%s\n", env.Backend, env.Model, env.Command, strings.Join(env.Args, ","))
-		for key, value := range env.Env {
-			fmt.Printf("%s=%s\n", key, value)
-		}
-		return nil
+	return nil
+}
+
+func printJoinDryRun(env tcworker.JoinEnvironment) {
+	fmt.Printf("backend=%s\nmodel=%s\ncommand=%s\nargs=%s\n", env.Backend, env.Model, env.Command, strings.Join(env.Args, ","))
+	for key, value := range env.Env {
+		fmt.Printf("%s=%s\n", key, value)
 	}
+}
+
+func startJoinedWorker(ctx context.Context, env tcworker.JoinEnvironment, plain bool) error {
 	if !plain && isInteractiveTerminal() {
 		return tcworker.RunWorkerStatusTUI(ctx, env, runEnvWorker)
 	}
@@ -194,18 +245,18 @@ func runJoin(ctx context.Context, args []string) error {
 	return runEnvWorker(ctx)
 }
 
-func resolveJoinOptions(ctx context.Context, configPath string, setup bool, wizard bool, plain bool, yes bool, visited map[string]bool, flags tcworker.JoinOptions) (tcworker.JoinOptions, error) {
+func resolveJoinOptions(ctx context.Context, parsed joinRunOptions) (tcworker.JoinOptions, error) {
 	var base tcworker.JoinOptions
-	configExists := tcworker.WorkerConfigExists(configPath)
-	autoSetup := !wizard && !configExists && !hasExplicitJoinInput(visited) && isInteractiveTerminal()
-	if (setup && !configExists) || autoSetup {
+	configExists := tcworker.WorkerConfigExists(parsed.ConfigPath)
+	switch {
+	case shouldSetupBeforeJoin(parsed, configExists):
 		config, _, err := runSetupFlow(ctx, setupFlowOptions{
-			ConfigPath:     configPath,
-			Base:           flags,
-			AutoAccept:     yes,
-			Plain:          plain,
+			ConfigPath:     parsed.ConfigPath,
+			Base:           parsed.Options,
+			AutoAccept:     parsed.Yes,
+			Plain:          parsed.Plain,
 			ConfirmLabel:   "Save worker config?",
-			NonInteractive: yes || !isInteractiveTerminal(),
+			NonInteractive: parsed.Yes || !isInteractiveTerminal(),
 		})
 		if err != nil {
 			return tcworker.JoinOptions{}, err
@@ -214,8 +265,8 @@ func resolveJoinOptions(ctx context.Context, configPath string, setup bool, wiza
 		if err != nil {
 			return tcworker.JoinOptions{}, err
 		}
-	} else if configExists && !wizard {
-		config, err := tcworker.LoadWorkerConfig(configPath)
+	case configExists && !parsed.Wizard:
+		config, err := tcworker.LoadWorkerConfig(parsed.ConfigPath)
 		if err != nil {
 			return tcworker.JoinOptions{}, err
 		}
@@ -223,10 +274,19 @@ func resolveJoinOptions(ctx context.Context, configPath string, setup bool, wiza
 		if err != nil {
 			return tcworker.JoinOptions{}, err
 		}
-	} else if !configExists && !wizard && !hasExplicitJoinInput(visited) {
+	case !configExists && !parsed.Wizard && !hasExplicitJoinInput(parsed.Visited):
 		return tcworker.JoinOptions{}, fmt.Errorf("worker config not found; run tc-worker setup or pass explicit join flags")
+	default:
+		base = parsed.Options
 	}
-	return applyJoinFlagOverrides(base, flags, visited), nil
+	return applyJoinFlagOverrides(base, parsed.Options, parsed.Visited), nil
+}
+
+func shouldSetupBeforeJoin(parsed joinRunOptions, configExists bool) bool {
+	if parsed.Setup && !configExists {
+		return true
+	}
+	return !parsed.Wizard && !configExists && !hasExplicitJoinInput(parsed.Visited) && isInteractiveTerminal()
 }
 
 func hasExplicitJoinInput(visited map[string]bool) bool {
@@ -244,54 +304,41 @@ func hasExplicitJoinInput(visited map[string]bool) bool {
 }
 
 func applyJoinFlagOverrides(base tcworker.JoinOptions, flags tcworker.JoinOptions, visited map[string]bool) tcworker.JoinOptions {
-	if visited["server-url"] || visited["server"] {
-		base.ServerURL = flags.ServerURL
+	applyStringOverrides(&base, flags, visited)
+	applyDurationOverrides(&base, flags, visited)
+	applySliceOverrides(&base, flags, visited)
+	return base
+}
+
+func applyStringOverrides(base *tcworker.JoinOptions, flags tcworker.JoinOptions, visited map[string]bool) {
+	overrides := []struct {
+		names []string
+		set   func()
+	}{
+		{[]string{flagServerURL, "server"}, func() { base.ServerURL = flags.ServerURL }},
+		{[]string{"backend"}, func() { base.Backend = flags.Backend }},
+		{[]string{"model"}, func() { base.Model = flags.Model }},
+		{[]string{"command"}, func() { base.Command = flags.Command }},
+		{[]string{flagEndpointRef, "endpoint"}, func() { base.EndpointRef = flags.EndpointRef }},
+		{[]string{"display-name"}, func() { base.DisplayName = flags.DisplayName }},
+		{[]string{"actor-id"}, func() { base.ActorID = flags.ActorID }},
+		{[]string{"workspace-id"}, func() { base.WorkspaceID = flags.WorkspaceID }},
+		{[]string{"role"}, func() { base.Role = flags.Role }},
+		{[]string{"capabilities"}, func() { base.Capabilities = flags.Capabilities }},
+		{[]string{"permission"}, func() { base.Permission = flags.Permission }},
+		{[]string{flagSkillsDir}, func() { base.SkillsDir = flags.SkillsDir }},
+		{[]string{"workdir"}, func() { base.WorkDir = flags.WorkDir }},
+		{[]string{"artifact-dir"}, func() { base.ArtifactDir = flags.ArtifactDir }},
+		{[]string{"sandbox"}, func() { base.Sandbox = flags.Sandbox }},
 	}
-	if visited["backend"] {
-		base.Backend = flags.Backend
+	for _, item := range overrides {
+		if anyVisited(visited, item.names...) {
+			item.set()
+		}
 	}
-	if visited["model"] {
-		base.Model = flags.Model
-	}
-	if visited["command"] {
-		base.Command = flags.Command
-	}
-	if visited["args"] {
-		base.Args = append([]string(nil), flags.Args...)
-	}
-	if visited["endpoint-ref"] || visited["endpoint"] {
-		base.EndpointRef = flags.EndpointRef
-	}
-	if visited["display-name"] {
-		base.DisplayName = flags.DisplayName
-	}
-	if visited["actor-id"] {
-		base.ActorID = flags.ActorID
-	}
-	if visited["workspace-id"] {
-		base.WorkspaceID = flags.WorkspaceID
-	}
-	if visited["role"] {
-		base.Role = flags.Role
-	}
-	if visited["capabilities"] {
-		base.Capabilities = flags.Capabilities
-	}
-	if visited["permission"] {
-		base.Permission = flags.Permission
-	}
-	if visited["skills-dir"] {
-		base.SkillsDir = flags.SkillsDir
-	}
-	if visited["skill"] {
-		base.SkillPaths = append([]string(nil), flags.SkillPaths...)
-	}
-	if visited["workdir"] {
-		base.WorkDir = flags.WorkDir
-	}
-	if visited["artifact-dir"] {
-		base.ArtifactDir = flags.ArtifactDir
-	}
+}
+
+func applyDurationOverrides(base *tcworker.JoinOptions, flags tcworker.JoinOptions, visited map[string]bool) {
 	if visited["timeout"] {
 		base.Timeout = flags.Timeout
 	}
@@ -304,10 +351,24 @@ func applyJoinFlagOverrides(base tcworker.JoinOptions, flags tcworker.JoinOption
 	if visited["max-messages"] {
 		base.MaxMessages = flags.MaxMessages
 	}
-	if visited["sandbox"] {
-		base.Sandbox = flags.Sandbox
+}
+
+func applySliceOverrides(base *tcworker.JoinOptions, flags tcworker.JoinOptions, visited map[string]bool) {
+	if visited["args"] {
+		base.Args = append([]string(nil), flags.Args...)
 	}
-	return base
+	if visited["skill"] {
+		base.SkillPaths = append([]string(nil), flags.SkillPaths...)
+	}
+}
+
+func anyVisited(visited map[string]bool, names ...string) bool {
+	for _, name := range names {
+		if visited[name] {
+			return true
+		}
+	}
+	return false
 }
 
 type repeatedFlag []string

@@ -62,8 +62,8 @@ pipeline {
 
         SONARQUBE_INSTALLATION = 'sonarqube'
         SONAR_SCANNER_TOOL = 'SonarScanner'
-        SONAR_PROJECT_KEY = 'touch-connect'
-        SONAR_PROJECT_NAME = 'touch-connect'
+        SONAR_PROJECT_KEY = 'touch-connect-server'
+        SONAR_PROJECT_NAME = 'touch-connect-server'
         GO_COVERAGE_REPORT = 'coverage.out'
         CI = 'true'
 

@@ -58,3 +58,5 @@ jobs:
             "-Dsonar.test.inclusions=**/*_test.go"
             "-Dsonar.exclusions=**/*_test.go,**/vendor/**,**/node_modules/**"
             "-Dsonar.go.coverage.reportPaths=coverage.worker.out"
+            "-Dsonar.qualitygate.wait=true"
+            "-Dsonar.qualitygate.timeout=300"

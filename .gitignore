@@ -5,3 +5,9 @@ docs/
 # Local assistant/workflow state.
 .claude/
 .touch-connect/
+
+# Local deployment secrets.
+deploy/onprem/.env
+
+# Local/Jenkins Go coverage output.
+coverage.out

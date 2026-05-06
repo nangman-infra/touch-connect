@@ -1,0 +1,86 @@
+name: touch-connect
+
+services:
+  nats:
+    image: nats:2.12.7-alpine
+    command:
+      - -js
+      - -sd
+      - /data
+      - -m
+      - "8222"
+    restart: unless-stopped
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - type: bind
+        source: /srv/touch-connect/nats
+        target: /data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 30
+
+  tc-server:
+    image: harbor.nangman.cloud/library/touch-connect-server:latest
+    restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      TC_SERVER_BIND_ADDR: 0.0.0.0:8080
+      TC_SERVER_STORAGE: sqlite
+      TC_SERVER_SQLITE_PATH: /data/touch-connect.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - type: bind
+        source: /srv/touch-connect/server
+        target: /data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 30
+
+  tc-control:
+    image: harbor.nangman.cloud/library/touch-connect-control:latest
+    restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    depends_on:
+      tc-server:
+        condition: service_healthy
+    environment:
+      TC_CONTROL_BIND_ADDR: 0.0.0.0:8081
+      TC_CONTROL_SERVER_URL: http://tc-server:8080
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/readyz"]
+      interval: 5s
+      timeout: 2s
+      retries: 30
+
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    command:
+      - --http-api-update
+      - --label-enable
+      - --cleanup
+      - --rolling-restart
+    environment:
+      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_HTTP_API_TOKEN:?set WATCHTOWER_HTTP_API_TOKEN}
+    ports:
+      - "18081:8080"
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"

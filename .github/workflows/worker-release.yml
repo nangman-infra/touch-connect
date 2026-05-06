@@ -79,10 +79,17 @@ jobs:
           if [ -z "$tag" ]; then
             tag="${GITHUB_REF_NAME}"
           fi
+          release_flags=()
+          case "$tag" in
+            *-alpha*|*-beta*|*-rc*)
+              release_flags+=(--prerelease)
+              ;;
+          esac
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/tc-worker_*.tar.gz dist/checksums.txt --clobber
           else
             gh release create "$tag" dist/tc-worker_*.tar.gz dist/checksums.txt \
+              "${release_flags[@]}" \
               --title "tc-worker ${tag}" \
               --notes "tc-worker binaries for macOS and Linux on amd64 and arm64."
           fi

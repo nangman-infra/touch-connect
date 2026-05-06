@@ -14,6 +14,8 @@ type Handler struct {
 	service *application.Service
 }
 
+const messageRouteNotFound = "route not found"
+
 func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
 }
@@ -26,7 +28,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.servePost(w, r, path)
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		writeError(w, http.StatusNotFound, "not_found", messageRouteNotFound)
 	}
 }
 
@@ -54,7 +56,7 @@ func (h *Handler) serveGet(w http.ResponseWriter, r *http.Request, path string) 
 	case path == "v1/side-effects":
 		h.sideEffects(w, r)
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		writeError(w, http.StatusNotFound, "not_found", messageRouteNotFound)
 	}
 }
 
@@ -139,7 +141,7 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, path string)
 	case "v1/dlq/replay":
 		h.replayDeadLetter(w, r)
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		writeError(w, http.StatusNotFound, "not_found", messageRouteNotFound)
 	}
 }
 

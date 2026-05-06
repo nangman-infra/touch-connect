@@ -18,6 +18,7 @@ type Handler struct {
 
 const (
 	headerA2AVersion      = "A2A-Version"
+	messageRouteNotFound  = "route not found"
 	pathPrefixEndpoints   = "v1/endpoints/"
 	pathPrefixAttempts    = "v1/attempts/"
 	pathPrefixSideEffects = "v1/side-effects/"
@@ -36,7 +37,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.servePost(w, r, path)
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		writeError(w, http.StatusNotFound, "not_found", messageRouteNotFound)
 	}
 }
 
@@ -55,7 +56,7 @@ func (h *Handler) serveGet(w http.ResponseWriter, r *http.Request, path string) 
 	case path == "v1/control/snapshot":
 		writeJSON(w, http.StatusOK, h.service.SnapshotResponse())
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		writeError(w, http.StatusNotFound, "not_found", messageRouteNotFound)
 	}
 }
 
@@ -82,7 +83,7 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, path string)
 	case strings.HasPrefix(path, pathPrefixSideEffects) && strings.HasSuffix(path, pathSuffixComplete):
 		h.completeSideEffectExecution(w, r, path)
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		writeError(w, http.StatusNotFound, "not_found", messageRouteNotFound)
 	}
 }
 

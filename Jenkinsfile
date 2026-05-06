@@ -235,10 +235,27 @@ pipeline {
                         }
                         sh '''
                             set -eu
-                            go version
-                            go test ./... -coverprofile="$GO_COVERAGE_REPORT"
-                            python3 scripts/validate_docs.py
-                            test -f "$GO_COVERAGE_REPORT"
+                            host_uid=$(id -u)
+                            host_gid=$(id -g)
+
+                            docker run --rm \
+                                -e GO_COVERAGE_REPORT="$GO_COVERAGE_REPORT" \
+                                -e HOST_UID="$host_uid" \
+                                -e HOST_GID="$host_gid" \
+                                -v "$PWD:/workspace" \
+                                -w /workspace \
+                                golang:1.25-alpine \
+                                sh -lc '
+                                    set -eu
+                                    export PATH=/usr/local/go/bin:$PATH
+                                    apk add --no-cache python3
+                                    go version
+                                    python3 --version
+                                    go test ./... -coverprofile="$GO_COVERAGE_REPORT"
+                                    python3 scripts/validate_docs.py
+                                    test -f "$GO_COVERAGE_REPORT"
+                                    chown "$HOST_UID:$HOST_GID" "$GO_COVERAGE_REPORT"
+                                '
                         '''
                     }
                 }

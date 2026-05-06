@@ -16,66 +16,113 @@ type Handler struct {
 	service *application.Service
 }
 
+const (
+	headerA2AVersion      = "A2A-Version"
+	pathPrefixEndpoints   = "v1/endpoints/"
+	pathPrefixAttempts    = "v1/attempts/"
+	pathPrefixSideEffects = "v1/side-effects/"
+	pathSuffixComplete    = "/complete"
+)
+
 func NewHandler(service *application.Service) *Handler {
 	return &Handler{service: service}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(r.URL.Path, "/")
+	switch r.Method {
+	case http.MethodGet:
+		h.serveGet(w, r, path)
+	case http.MethodPost:
+		h.servePost(w, r, path)
+	default:
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+	}
+}
+
+func (h *Handler) serveGet(w http.ResponseWriter, r *http.Request, path string) {
 	switch {
-	case r.Method == http.MethodGet && path == "healthz":
+	case path == "healthz":
 		writeJSON(w, http.StatusOK, h.service.Health())
-	case r.Method == http.MethodGet && path == "readyz":
+	case path == "readyz":
 		health := h.service.Health()
 		health.Status = "ready"
 		writeJSON(w, http.StatusOK, health)
-	case r.Method == http.MethodGet && path == "version":
+	case path == "version":
 		writeJSON(w, http.StatusOK, h.service.Version())
-	case r.Method == http.MethodGet && path == ".well-known/agent.json":
+	case path == ".well-known/agent.json":
 		h.a2aAgentCard(w, r)
-	case r.Method == http.MethodPost && (path == "a2a/rpc" || path == "v1/a2a/rpc"):
-		h.a2aRPC(w, r)
-	case r.Method == http.MethodGet && path == "v1/control/snapshot":
+	case path == "v1/control/snapshot":
 		writeJSON(w, http.StatusOK, h.service.SnapshotResponse())
-	case r.Method == http.MethodPost && path == "v1/control/tasks/cancel":
+	default:
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+	}
+}
+
+func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, path string) {
+	switch {
+	case path == "a2a/rpc" || path == "v1/a2a/rpc":
+		h.a2aRPC(w, r)
+	case path == "v1/control/tasks/cancel":
 		h.cancelTask(w, r)
-	case r.Method == http.MethodPost && path == "v1/control/tasks/retry":
+	case path == "v1/control/tasks/retry":
 		h.retryTask(w, r)
-	case r.Method == http.MethodPost && path == "v1/control/dlq/replay":
+	case path == "v1/control/dlq/replay":
 		h.replayDeadLetter(w, r)
-	case r.Method == http.MethodPost && path == "v1/control/artifacts/finalize":
+	case path == "v1/control/artifacts/finalize":
 		h.finalizeArtifact(w, r)
-	case r.Method == http.MethodPost && path == "v1/endpoints/register":
-		h.registerEndpoint(w, r)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/endpoints/") && strings.HasSuffix(path, "/heartbeat"):
-		h.heartbeatEndpoint(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/endpoints/") && strings.HasSuffix(path, "/capabilities"):
-		h.advertiseCapabilities(w, r, path)
-	case r.Method == http.MethodPost && path == "v1/messages":
+	case h.servePostEndpoint(w, r, path):
+	case path == "v1/messages":
 		h.ingressMessage(w, r)
-	case r.Method == http.MethodPost && path == "v1/messages/claim-next":
+	case path == "v1/messages/claim-next":
 		h.claimNextMessage(w, r)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/messages/") && strings.HasSuffix(path, "/claim"):
+	case strings.HasPrefix(path, "v1/messages/") && strings.HasSuffix(path, "/claim"):
 		h.claimMessage(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/checkpoints"):
-		h.submitCheckpoint(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/readback"):
-		h.submitReadback(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/lease"):
-		h.refreshLease(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/artifacts"):
-		h.registerArtifactVersion(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/approvals"):
-		h.recordApprovalDecision(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/side-effects"):
-		h.startSideEffectExecution(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/attempts/") && strings.HasSuffix(path, "/complete"):
-		h.completeAttempt(w, r, path)
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "v1/side-effects/") && strings.HasSuffix(path, "/complete"):
+	case h.servePostAttempt(w, r, path):
+	case strings.HasPrefix(path, pathPrefixSideEffects) && strings.HasSuffix(path, pathSuffixComplete):
 		h.completeSideEffectExecution(w, r, path)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 	}
+}
+
+func (h *Handler) servePostEndpoint(w http.ResponseWriter, r *http.Request, path string) bool {
+	switch {
+	case path == "v1/endpoints/register":
+		h.registerEndpoint(w, r)
+	case strings.HasPrefix(path, pathPrefixEndpoints) && strings.HasSuffix(path, "/heartbeat"):
+		h.heartbeatEndpoint(w, r, path)
+	case strings.HasPrefix(path, pathPrefixEndpoints) && strings.HasSuffix(path, "/capabilities"):
+		h.advertiseCapabilities(w, r, path)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h *Handler) servePostAttempt(w http.ResponseWriter, r *http.Request, path string) bool {
+	if !strings.HasPrefix(path, pathPrefixAttempts) {
+		return false
+	}
+	switch {
+	case strings.HasSuffix(path, "/checkpoints"):
+		h.submitCheckpoint(w, r, path)
+	case strings.HasSuffix(path, "/readback"):
+		h.submitReadback(w, r, path)
+	case strings.HasSuffix(path, "/lease"):
+		h.refreshLease(w, r, path)
+	case strings.HasSuffix(path, "/artifacts"):
+		h.registerArtifactVersion(w, r, path)
+	case strings.HasSuffix(path, "/approvals"):
+		h.recordApprovalDecision(w, r, path)
+	case strings.HasSuffix(path, "/side-effects"):
+		h.startSideEffectExecution(w, r, path)
+	case strings.HasSuffix(path, pathSuffixComplete):
+		h.completeAttempt(w, r, path)
+	default:
+		return false
+	}
+	return true
 }
 
 func (h *Handler) registerEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -115,14 +162,14 @@ func (h *Handler) ingressMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) a2aAgentCard(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("A2A-Version", a2aadapter.ProtocolVersion)
+	w.Header().Set(headerA2AVersion, a2aadapter.ProtocolVersion)
 	card := a2aadapter.AgentCardFromSnapshot(a2aBaseURL(r), h.service.SnapshotResponse(), h.service.Version().Version)
 	writeJSON(w, http.StatusOK, card)
 }
 
 func (h *Handler) a2aRPC(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("A2A-Version", a2aadapter.ProtocolVersion)
-	if !a2aadapter.VersionSupported(r.Header.Get("A2A-Version")) {
+	w.Header().Set(headerA2AVersion, a2aadapter.ProtocolVersion)
+	if !a2aadapter.VersionSupported(r.Header.Get(headerA2AVersion)) {
 		writeA2AResponse(w, a2aadapter.ErrorResponse(nil, a2aadapter.ErrorVersionUnsupported, a2aadapter.ErrVersionNotSupported.Error(), map[string]any{
 			"supported_version": a2aadapter.ProtocolVersion,
 		}))
@@ -296,7 +343,7 @@ func (h *Handler) completeAttempt(w http.ResponseWriter, r *http.Request, path s
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	res, err := h.service.CompleteAttempt(attemptRefFromPath(path, "/complete"), req)
+	res, err := h.service.CompleteAttempt(attemptRefFromPath(path, pathSuffixComplete), req)
 	writeResult(w, http.StatusAccepted, res, err)
 }
 
@@ -332,17 +379,29 @@ func writeResult(w http.ResponseWriter, status int, value any, err error) {
 		})
 		return
 	}
-	if errors.Is(err, domain.ErrEndpointNotFound) ||
+	if isNotFoundError(err) {
+		writeError(w, http.StatusNotFound, err.Error(), err.Error())
+		return
+	}
+	if isConflictError(err) {
+		writeError(w, http.StatusConflict, err.Error(), err.Error())
+		return
+	}
+	writeError(w, http.StatusBadRequest, err.Error(), err.Error())
+}
+
+func isNotFoundError(err error) bool {
+	return errors.Is(err, domain.ErrEndpointNotFound) ||
 		errors.Is(err, domain.ErrCapabilityNotFound) ||
 		errors.Is(err, domain.ErrMessageNotFound) ||
 		errors.Is(err, domain.ErrAttemptNotFound) ||
 		errors.Is(err, domain.ErrArtifactNotFound) ||
 		errors.Is(err, domain.ErrApprovalNotFound) ||
-		errors.Is(err, domain.ErrSideEffectNotFound) {
-		writeError(w, http.StatusNotFound, err.Error(), err.Error())
-		return
-	}
-	if errors.Is(err, domain.ErrMessageUnavailable) ||
+		errors.Is(err, domain.ErrSideEffectNotFound)
+}
+
+func isConflictError(err error) bool {
+	return errors.Is(err, domain.ErrMessageUnavailable) ||
 		errors.Is(err, domain.ErrStaleAttempt) ||
 		errors.Is(err, domain.ErrEndpointStale) ||
 		errors.Is(err, domain.ErrLeaseExpired) ||
@@ -353,11 +412,7 @@ func writeResult(w http.ResponseWriter, status int, value any, err error) {
 		errors.Is(err, domain.ErrApprovalExpired) ||
 		errors.Is(err, domain.ErrApprovalHashMismatch) ||
 		errors.Is(err, domain.ErrSelfApproval) ||
-		errors.Is(err, domain.ErrSideEffectConflict) {
-		writeError(w, http.StatusConflict, err.Error(), err.Error())
-		return
-	}
-	writeError(w, http.StatusBadRequest, err.Error(), err.Error())
+		errors.Is(err, domain.ErrSideEffectConflict)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -400,7 +455,7 @@ func a2aBaseURL(r *http.Request) string {
 }
 
 func endpointRefFromPath(path string, suffix string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(path, "v1/endpoints/"), suffix)
+	return strings.TrimSuffix(strings.TrimPrefix(path, pathPrefixEndpoints), suffix)
 }
 
 func messageRefFromPath(path string) string {
@@ -408,9 +463,9 @@ func messageRefFromPath(path string) string {
 }
 
 func attemptRefFromPath(path string, suffix string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(path, "v1/attempts/"), suffix)
+	return strings.TrimSuffix(strings.TrimPrefix(path, pathPrefixAttempts), suffix)
 }
 
 func sideEffectRefFromPath(path string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(path, "v1/side-effects/"), "/complete")
+	return strings.TrimSuffix(strings.TrimPrefix(path, pathPrefixSideEffects), pathSuffixComplete)
 }

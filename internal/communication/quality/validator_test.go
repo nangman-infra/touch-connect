@@ -176,3 +176,115 @@ func TestValidateMessageWithGateSkipRecordsSkippedDecision(t *testing.T) {
 		t.Fatalf("expected skip gate to avoid validator violations, got %+v", decision.Violations)
 	}
 }
+
+func TestFieldPresentCoversEnvelopePayloadConstraintsAndReferences(t *testing.T) {
+	req := contracts.MessageIngressRequest{
+		MessageRef:        "tc://message/msg_quality_fields",
+		SenderEndpointRef: "tc://endpoint/tcctl",
+		TargetCapability:  "code.change",
+		CorrelationRef:    "tc://task/t",
+		ReadbackRequired:  true,
+		Payload: contracts.Payload{
+			Summary: "summary",
+			Body:    "body",
+			References: []contracts.Reference{{
+				Ref:  "tc://artifact-version/a1",
+				Type: "artifact_version",
+			}},
+		},
+		Constraints: []contracts.Constraint{{
+			Code:      "must_preserve_contract",
+			SourceRef: "tc://contract/c1",
+		}},
+	}
+
+	for _, field := range []string{
+		"message_ref",
+		"sender_endpoint_ref",
+		"target_capability",
+		"correlation_ref",
+		"readback_required",
+		"payload.summary",
+		"payload.body",
+		"payload.references",
+		"references",
+		"constraints",
+		"must_preserve_contract",
+		"tc://contract/c1",
+		"artifact_version",
+		"tc://artifact-version/a1",
+	} {
+		if !fieldPresent(req, field) {
+			t.Fatalf("expected field %q to be present", field)
+		}
+	}
+	if fieldPresent(req, "missing_field") {
+		t.Fatal("missing field should not be present")
+	}
+}
+
+func TestValidateMessageFallbackActionsAndSeverityDefaults(t *testing.T) {
+	baseRequest := contracts.MessageIngressRequest{
+		SenderEndpointRef: "tc://endpoint/tcctl",
+		TargetCapability:  "code.change",
+		Payload: contracts.Payload{
+			Summary:    "summary",
+			Body:       "body",
+			References: []contracts.Reference{},
+		},
+		Constraints: []contracts.Constraint{},
+	}
+
+	cases := []struct {
+		name     string
+		fallback string
+		want     string
+	}{
+		{"clarification", contracts.QualityFallbackRequestClarification, contracts.QualityDecisionClarificationRequired},
+		{"review", contracts.QualityFallbackRouteToReview, contracts.QualityDecisionReviewRequired},
+		{"warn default", "", contracts.QualityDecisionWarned},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := baseRequest
+			req.PhraseologyPolicy = &contracts.PhraseologyPolicy{
+				RequiredFields: []string{"constraints"},
+				FallbackAction: tc.fallback,
+			}
+			decision := ValidateMessage(ValidationInput{
+				DecisionRef: "tc://quality-decision/" + tc.name,
+				MessageRef:  "tc://message/" + tc.name,
+				Request:     req,
+			})
+			if decision.Decision != tc.want {
+				t.Fatalf("decision = %q, want %q", decision.Decision, tc.want)
+			}
+			if len(decision.Violations) != 1 {
+				t.Fatalf("expected one violation, got %+v", decision.Violations)
+			}
+			if decision.Violations[0].Severity != contracts.QualitySeverityWarning {
+				t.Fatalf("default severity = %q", decision.Violations[0].Severity)
+			}
+		})
+	}
+}
+
+func TestLineageReferenceDetectionAcceptsArtifactReferences(t *testing.T) {
+	req := contracts.MessageIngressRequest{
+		Payload: contracts.Payload{
+			Body: "replace the prior artifact",
+			References: []contracts.Reference{{
+				Ref:  "tc://artifact/a",
+				Type: "artifact",
+			}},
+		},
+	}
+	if violation, ok := missingLineageReferenceViolation(req); ok {
+		t.Fatalf("artifact reference should satisfy lineage requirement: %+v", violation)
+	}
+
+	req.Payload.References = []contracts.Reference{{Ref: "tc://artifact-version/a1", Type: "document"}}
+	if violation, ok := missingLineageReferenceViolation(req); ok {
+		t.Fatalf("artifact-version ref should satisfy lineage requirement: %+v", violation)
+	}
+}

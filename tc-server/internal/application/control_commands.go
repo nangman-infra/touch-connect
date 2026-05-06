@@ -24,18 +24,31 @@ func (s *Service) CancelTask(req contracts.TaskCommandRequest) (contracts.TaskCo
 		}
 		response.MessageRefs = append(response.MessageRefs, message.MessageRef)
 		response.AffectedMessages++
-		if message.AttemptRef != "" {
-			if attempt, ok := s.processing.GetAttempt(message.AttemptRef); ok && !attemptClosed(attempt.State) {
-				attempt.State = domain.AttemptStateCanceled
-				if err := s.processing.UpdateAttempt(attempt); err != nil {
-					return contracts.TaskCommandResponse{}, err
-				}
-				response.AttemptRefs = append(response.AttemptRefs, attempt.AttemptRef)
-				response.AffectedAttempts++
-			}
+		attemptRef, canceled, err := s.cancelOpenAttempt(message.AttemptRef)
+		if err != nil {
+			return contracts.TaskCommandResponse{}, err
+		}
+		if canceled {
+			response.AttemptRefs = append(response.AttemptRefs, attemptRef)
+			response.AffectedAttempts++
 		}
 	}
 	return response, nil
+}
+
+func (s *Service) cancelOpenAttempt(attemptRef string) (string, bool, error) {
+	if attemptRef == "" {
+		return "", false, nil
+	}
+	attempt, ok := s.processing.GetAttempt(attemptRef)
+	if !ok || attemptClosed(attempt.State) {
+		return "", false, nil
+	}
+	attempt.State = domain.AttemptStateCanceled
+	if err := s.processing.UpdateAttempt(attempt); err != nil {
+		return "", false, err
+	}
+	return attempt.AttemptRef, true, nil
 }
 
 func (s *Service) RetryTask(req contracts.TaskCommandRequest) (contracts.TaskCommandResponse, error) {

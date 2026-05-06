@@ -4,6 +4,10 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/nangman-infra/touch-connect/tc-server/internal/application"
+	"github.com/nangman-infra/touch-connect/tc-server/internal/domain"
+	"github.com/nats-io/nats.go"
 )
 
 func TestConfigValidatedSetsDefaults(t *testing.T) {
@@ -132,5 +136,78 @@ func TestAckAndNakRequirePendingDelivery(t *testing.T) {
 	}
 	if err := adapter.NakDelivery("tc://delivery/missing", "test"); !errors.Is(err, ErrDeliveryNotPending) {
 		t.Fatalf("expected ErrDeliveryNotPending on nak, got %v", err)
+	}
+}
+
+func TestPublishAcceptedMessageValidatesRefsBeforeBrokerUse(t *testing.T) {
+	adapter := &Adapter{}
+	if _, err := adapter.PublishAcceptedMessage(domain.Message{DeliveryRef: "tc://delivery/d"}); !errors.Is(err, ErrMessageRefRequired) {
+		t.Fatalf("expected ErrMessageRefRequired, got %v", err)
+	}
+	if _, err := adapter.PublishAcceptedMessage(domain.Message{MessageRef: "tc://message/m"}); !errors.Is(err, ErrDeliveryRefRequired) {
+		t.Fatalf("expected ErrDeliveryRefRequired, got %v", err)
+	}
+}
+
+func TestFetchNextDeliveryValidatesConsumerAndCapabilities(t *testing.T) {
+	adapter := &Adapter{}
+	if _, _, err := adapter.FetchNextDelivery(application.DeliveryFetchRequest{Capabilities: []string{"code.change"}}); !errors.Is(err, ErrFetchRequiresPullConsumer) {
+		t.Fatalf("expected ErrFetchRequiresPullConsumer, got %v", err)
+	}
+	adapter.subscription = &nats.Subscription{}
+	if _, found, err := adapter.FetchNextDelivery(application.DeliveryFetchRequest{}); err != nil || found {
+		t.Fatalf("empty capabilities should return no delivery, found=%v err=%v", found, err)
+	}
+}
+
+func TestDeliveryRecordFromMessageCopiesHeadersAndMetadata(t *testing.T) {
+	adapter := &Adapter{}
+	message := &nats.Msg{
+		Subject: "tc.messages.code.change",
+		Header:  nats.Header{},
+		Data:    []byte(`{"payload":"ignored"}`),
+	}
+	message.Header.Set(HeaderMessageRef, "tc://message/m")
+	message.Header.Set(HeaderDeliveryRef, "tc://delivery/d")
+	message.Header.Set(HeaderAttemptRef, "tc://attempt/a")
+	message.Header.Set(HeaderCorrelationRef, "tc://task/t")
+	message.Header.Set(HeaderCapability, "code.change")
+
+	record := adapter.deliveryRecordFromMessage(message)
+	if record.MessageRef != "tc://message/m" || record.DeliveryRef != "tc://delivery/d" || record.Subject != "tc.messages.code.change" {
+		t.Fatalf("unexpected record: %+v", record)
+	}
+	if record.Metadata[HeaderAttemptRef] != "tc://attempt/a" || record.Metadata[HeaderCapability] != "code.change" || record.Metadata["adapter_subject"] != "tc.messages.code.change" {
+		t.Fatalf("unexpected metadata: %+v", record.Metadata)
+	}
+}
+
+func TestPendingDeliveryLifecycle(t *testing.T) {
+	adapter := &Adapter{}
+	message := &nats.Msg{}
+	if err := adapter.trackPendingDelivery("tc://delivery/d", message); err != nil {
+		t.Fatalf("track pending delivery: %v", err)
+	}
+	if err := adapter.trackPendingDelivery("tc://delivery/d", message); !errors.Is(err, ErrDeliveryAlreadyPending) {
+		t.Fatalf("expected duplicate pending error, got %v", err)
+	}
+	if got, ok := adapter.pendingDelivery("tc://delivery/d"); !ok || got != message {
+		t.Fatal("pending delivery not found")
+	}
+	adapter.removePendingDelivery("tc://delivery/d")
+	if _, ok := adapter.pendingDelivery("tc://delivery/d"); ok {
+		t.Fatal("pending delivery should be removed")
+	}
+}
+
+func TestValidateDeliveryRecord(t *testing.T) {
+	if err := validateDeliveryRecord(application.DeliveryRecord{}); !errors.Is(err, ErrDeliveryRefRequired) {
+		t.Fatalf("expected delivery ref error, got %v", err)
+	}
+	if err := validateDeliveryRecord(application.DeliveryRecord{DeliveryRef: "tc://delivery/d"}); !errors.Is(err, ErrMessageRefRequired) {
+		t.Fatalf("expected message ref error, got %v", err)
+	}
+	if err := validateDeliveryRecord(application.DeliveryRecord{DeliveryRef: "tc://delivery/d", MessageRef: "tc://message/m"}); err != nil {
+		t.Fatalf("valid record rejected: %v", err)
 	}
 }

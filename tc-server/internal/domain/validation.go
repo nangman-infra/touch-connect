@@ -124,26 +124,36 @@ func ValidateCompletion(req contracts.CompleteAttemptRequest) error {
 }
 
 func ValidateArtifactVersion(req contracts.ArtifactVersionRequest) error {
-	if blank(req.EndpointRef) ||
-		blank(req.ArtifactRef) ||
-		blank(req.ArtifactVersionRef) ||
-		blank(req.RoomRef) ||
-		blank(req.TaskRef) ||
-		blank(req.Kind) ||
-		blank(req.MediaType) ||
-		blank(req.Checksum) ||
-		blank(req.StorageRef) ||
-		blank(req.RetentionClass) ||
-		blank(req.AccessScope) {
+	if !artifactVersionFieldsComplete(req) {
 		return ErrInvalidInput
 	}
 	if req.TaskRevision <= 0 || req.SizeBytes < 0 {
 		return ErrInvalidInput
 	}
-	if !validArtifactKind(req.Kind) || !validRetentionClass(req.RetentionClass) || !validAccessScope(req.AccessScope) {
+	if !artifactVersionEnumsValid(req) {
 		return ErrInvalidInput
 	}
 	return nil
+}
+
+func artifactVersionFieldsComplete(req contracts.ArtifactVersionRequest) bool {
+	return !blank(req.EndpointRef) &&
+		!blank(req.ArtifactRef) &&
+		!blank(req.ArtifactVersionRef) &&
+		!blank(req.RoomRef) &&
+		!blank(req.TaskRef) &&
+		!blank(req.Kind) &&
+		!blank(req.MediaType) &&
+		!blank(req.Checksum) &&
+		!blank(req.StorageRef) &&
+		!blank(req.RetentionClass) &&
+		!blank(req.AccessScope)
+}
+
+func artifactVersionEnumsValid(req contracts.ArtifactVersionRequest) bool {
+	return validArtifactKind(req.Kind) &&
+		validRetentionClass(req.RetentionClass) &&
+		validAccessScope(req.AccessScope)
 }
 
 func ValidateApprovalDecision(req contracts.ApprovalDecisionRequest) error {

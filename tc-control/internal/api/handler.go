@@ -20,61 +20,124 @@ func NewHandler(service *application.Service) *Handler {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(r.URL.Path, "/")
+	switch r.Method {
+	case http.MethodGet:
+		h.serveGet(w, r, path)
+	case http.MethodPost:
+		h.servePost(w, r, path)
+	default:
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+	}
+}
+
+func (h *Handler) serveGet(w http.ResponseWriter, r *http.Request, path string) {
 	switch {
-	case r.Method == http.MethodGet && path == "healthz":
+	case path == "healthz":
 		writeJSON(w, http.StatusOK, h.service.Health())
-	case r.Method == http.MethodGet && path == "readyz":
+	case path == "readyz":
 		h.ready(w, r)
-	case r.Method == http.MethodGet && path == "version":
+	case path == "version":
 		h.version(w, r)
-	case r.Method == http.MethodGet && path == "v1/snapshot":
+	case path == "v1/snapshot":
 		h.snapshot(w, r)
-	case r.Method == http.MethodGet && path == "v1/endpoints":
+	case path == "v1/endpoints":
 		h.endpoints(w, r)
-	case r.Method == http.MethodGet && path == "v1/endpoints/inspect":
+	case path == "v1/endpoints/inspect":
 		h.endpoint(w, r)
-	case r.Method == http.MethodGet && path == "v1/capabilities":
+	case path == "v1/capabilities":
 		h.capabilities(w, r)
-	case r.Method == http.MethodGet && path == "v1/messages":
-		h.messages(w, r)
-	case r.Method == http.MethodPost && path == "v1/messages":
-		h.sendMessage(w, r)
-	case r.Method == http.MethodGet && path == "v1/messages/inspect":
-		h.message(w, r)
-	case r.Method == http.MethodGet && path == "v1/messages/history":
-		h.messages(w, r)
-	case r.Method == http.MethodGet && path == "v1/tasks/status":
-		h.taskStatus(w, r)
-	case r.Method == http.MethodPost && path == "v1/tasks/cancel":
-		h.cancelTask(w, r)
-	case r.Method == http.MethodPost && path == "v1/tasks/retry":
-		h.retryTask(w, r)
-	case r.Method == http.MethodGet && path == "v1/tasks/history":
-		h.taskHistory(w, r)
-	case r.Method == http.MethodGet && path == "v1/artifacts":
-		h.artifacts(w, r)
-	case r.Method == http.MethodGet && path == "v1/artifacts/lineage":
-		h.artifactLineage(w, r)
-	case r.Method == http.MethodPost && path == "v1/artifacts/finalize":
-		h.finalizeArtifact(w, r)
-	case r.Method == http.MethodGet && path == "v1/artifacts/inspect":
-		h.artifact(w, r)
-	case r.Method == http.MethodGet && path == "v1/approvals":
-		h.approvals(w, r)
-	case r.Method == http.MethodGet && path == "v1/approvals/chain":
-		h.approvalChain(w, r)
-	case r.Method == http.MethodPost && path == "v1/approvals/decide":
-		h.recordApproval(w, r)
-	case r.Method == http.MethodGet && path == "v1/approvals/inspect":
-		h.approval(w, r)
-	case r.Method == http.MethodGet && path == "v1/dlq":
-		h.deadLetters(w, r)
-	case r.Method == http.MethodPost && path == "v1/dlq/replay":
-		h.replayDeadLetter(w, r)
-	case r.Method == http.MethodGet && path == "v1/dlq/inspect":
-		h.deadLetter(w, r)
-	case r.Method == http.MethodGet && path == "v1/side-effects":
+	case h.serveGetMessages(w, r, path):
+	case h.serveGetTasks(w, r, path):
+	case h.serveGetArtifacts(w, r, path):
+	case h.serveGetApprovals(w, r, path):
+	case h.serveGetDLQ(w, r, path):
+	case path == "v1/side-effects":
 		h.sideEffects(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+	}
+}
+
+func (h *Handler) serveGetMessages(w http.ResponseWriter, r *http.Request, path string) bool {
+	switch {
+	case path == "v1/messages":
+		h.messages(w, r)
+	case path == "v1/messages/inspect":
+		h.message(w, r)
+	case path == "v1/messages/history":
+		h.messages(w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h *Handler) serveGetTasks(w http.ResponseWriter, r *http.Request, path string) bool {
+	switch {
+	case path == "v1/tasks/status":
+		h.taskStatus(w, r)
+	case path == "v1/tasks/history":
+		h.taskHistory(w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h *Handler) serveGetArtifacts(w http.ResponseWriter, r *http.Request, path string) bool {
+	switch {
+	case path == "v1/artifacts":
+		h.artifacts(w, r)
+	case path == "v1/artifacts/lineage":
+		h.artifactLineage(w, r)
+	case path == "v1/artifacts/inspect":
+		h.artifact(w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h *Handler) serveGetApprovals(w http.ResponseWriter, r *http.Request, path string) bool {
+	switch {
+	case path == "v1/approvals":
+		h.approvals(w, r)
+	case path == "v1/approvals/chain":
+		h.approvalChain(w, r)
+	case path == "v1/approvals/inspect":
+		h.approval(w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h *Handler) serveGetDLQ(w http.ResponseWriter, r *http.Request, path string) bool {
+	switch {
+	case path == "v1/dlq":
+		h.deadLetters(w, r)
+	case path == "v1/dlq/inspect":
+		h.deadLetter(w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, path string) {
+	switch path {
+	case "v1/messages":
+		h.sendMessage(w, r)
+	case "v1/tasks/cancel":
+		h.cancelTask(w, r)
+	case "v1/tasks/retry":
+		h.retryTask(w, r)
+	case "v1/artifacts/finalize":
+		h.finalizeArtifact(w, r)
+	case "v1/approvals/decide":
+		h.recordApproval(w, r)
+	case "v1/dlq/replay":
+		h.replayDeadLetter(w, r)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 	}

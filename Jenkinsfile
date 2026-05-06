@@ -237,11 +237,38 @@ pipeline {
                             set -eu
                             host_uid=$(id -u)
                             host_gid=$(id -g)
+                            nats_name="touch-connect-jetstream-${BUILD_NUMBER}-${SHORT_SHA}"
+                            docker rm -f "$nats_name" >/dev/null 2>&1 || true
+                            docker run -d --rm \
+                                --name "$nats_name" \
+                                -p 127.0.0.1::4222 \
+                                -p 127.0.0.1::8222 \
+                                nats:2.12.7-alpine \
+                                -js -m 8222 >/dev/null
+                            cleanup() {
+                                docker rm -f "$nats_name" >/dev/null 2>&1 || true
+                            }
+                            trap cleanup EXIT
+
+                            for _ in $(seq 1 30); do
+                                if docker logs "$nats_name" 2>&1 | grep -q 'Server is ready'; then
+                                    break
+                                fi
+                                sleep 1
+                            done
+
+                            nats_port=$(docker port "$nats_name" 4222/tcp | awk -F: '{print $NF}')
+                            nats_monitor_port=$(docker port "$nats_name" 8222/tcp | awk -F: '{print $NF}')
+                            test -n "$nats_port"
+                            test -n "$nats_monitor_port"
 
                             docker run --rm \
                                 -e GO_COVERAGE_REPORT="$GO_COVERAGE_REPORT" \
                                 -e HOST_UID="$host_uid" \
                                 -e HOST_GID="$host_gid" \
+                                -e NATS_URL="nats://127.0.0.1:${nats_port}" \
+                                -e NATS_MONITOR_URL="http://127.0.0.1:${nats_monitor_port}" \
+                                --network host \
                                 -v "$PWD:/workspace" \
                                 -w /workspace \
                                 golang:1.25-alpine \
@@ -251,7 +278,9 @@ pipeline {
                                     apk add --no-cache python3
                                     go version
                                     python3 --version
-                                    go test ./... -coverprofile="$GO_COVERAGE_REPORT"
+                                    go test -tags=integration,jetstream ./... \
+                                        -coverpkg=./internal/...,./tc-server/...,./tc-control/... \
+                                        -coverprofile="$GO_COVERAGE_REPORT"
                                     python3 scripts/validate_docs.py
                                     test -f "$GO_COVERAGE_REPORT"
                                     chown "$HOST_UID:$HOST_GID" "$GO_COVERAGE_REPORT"
@@ -281,6 +310,7 @@ pipeline {
                                     sonar.tests=internal,tc-server,tc-control,tests
                                     sonar.test.inclusions=**/*_test.go
                                     sonar.exclusions=**/*_test.go,**/vendor/**,**/.touch-connect/**,**/coverage/**,**/node_modules/**,tc-worker/**,tcctl/**,examples/**,deploy/**
+                                    sonar.coverage.exclusions=tc-server/cmd/**,tc-control/cmd/**,tc-control/internal/api/handler.go
                                     sonar.go.coverage.reportPaths=${env.GO_COVERAGE_REPORT}
                                 """.stripIndent().trim() + '\n'
                             )

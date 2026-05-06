@@ -52,6 +52,20 @@ func TestServiceDeliveryAdapterBridgePublishesFetchesAndClaims(t *testing.T) {
 	}
 }
 
+func TestNewServiceValidatesPortsAndQualityError(t *testing.T) {
+	store := memory.NewStore()
+	if _, err := application.NewService(application.ServicePorts{}, application.DefaultSettings()); err == nil {
+		t.Fatal("expected empty ports to fail")
+	}
+	if _, err := application.NewService(application.PortsFromStore(store), application.DefaultSettings()); err != nil {
+		t.Fatalf("valid ports rejected: %v", err)
+	}
+	qualityErr := application.QualityRejectedError{Decision: contracts.QualityDecision{QualityDecisionRef: "tc://quality-decision/q"}}
+	if qualityErr.Error() == "" {
+		t.Fatal("quality error should have message")
+	}
+}
+
 func TestServiceDeliveryAdapterBridgeAcksTerminalCheckpoint(t *testing.T) {
 	service, delivery := newServiceWithFakeDeliveryAdapter(t)
 	registerDeliveryBridgeEndpoint(t, service)
@@ -202,7 +216,7 @@ func newServiceWithFakeDeliveryAdapter(t *testing.T) (*application.Service, *fak
 	settings := application.DefaultSettings()
 	now := time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC)
 	settings.Now = func() time.Time { return now }
-	service, err := application.NewServiceWithDeliveryAdapter(store, store, store, store, store, store, store, delivery, store, store, settings)
+	service, err := application.NewServiceWithDeliveryAdapter(application.PortsFromStore(store), delivery, settings)
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}

@@ -50,15 +50,15 @@ func NewServerWithStore(store application.Store, settings application.Settings) 
 	if store == nil {
 		return nil, errors.New("store is required")
 	}
-	return NewServerWithPorts(store, store, store, store, store, store, store, store, store, settings)
+	return NewServerWithPorts(application.PortsFromStore(store), settings)
 }
 
-func NewServerWithPorts(endpoints application.EndpointRegistry, messages application.MessageLedger, processing application.ProcessingLedger, readbacks application.ReadbackLedger, artifacts application.ArtifactLedger, governance application.GovernanceLedger, quality application.QualityLedger, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
-	return NewServerWithPortsAndDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, quality, nil, refs, projections, settings)
+func NewServerWithPorts(ports application.ServicePorts, settings application.Settings) (*Server, error) {
+	return NewServerWithPortsAndDeliveryAdapter(ports, nil, settings)
 }
 
-func NewServerWithPortsAndDeliveryAdapter(endpoints application.EndpointRegistry, messages application.MessageLedger, processing application.ProcessingLedger, readbacks application.ReadbackLedger, artifacts application.ArtifactLedger, governance application.GovernanceLedger, quality application.QualityLedger, delivery application.DeliveryAdapter, refs application.RefAllocator, projections application.ProjectionReader, settings application.Settings) (*Server, error) {
-	service, err := application.NewServiceWithDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, quality, delivery, refs, projections, settings)
+func NewServerWithPortsAndDeliveryAdapter(ports application.ServicePorts, delivery application.DeliveryAdapter, settings application.Settings) (*Server, error) {
+	service, err := application.NewServiceWithDeliveryAdapter(ports, delivery, settings)
 	if err != nil {
 		return nil, err
 	}

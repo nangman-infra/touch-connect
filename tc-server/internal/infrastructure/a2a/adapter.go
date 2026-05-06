@@ -34,6 +34,9 @@ const (
 	ErrorInternal           = -32603
 	ErrorTaskNotFound       = -32001
 	ErrorVersionUnsupported = -32002
+
+	mediaTypeTextPlain       = "text/plain"
+	mediaTypeApplicationJSON = "application/json"
 )
 
 var (
@@ -268,7 +271,7 @@ func SendMessageResponseFromIngress(req SendMessageRequest, accepted contracts.M
 				Role:      RoleAgent,
 				Parts: []Part{{
 					Text:      "touch-connect accepted the A2A message",
-					MediaType: "text/plain",
+					MediaType: mediaTypeTextPlain,
 				}},
 			},
 		},
@@ -300,7 +303,7 @@ func TaskFromSnapshot(taskID string, snapshot contracts.SnapshotResponse) (Task,
 				Role:      RoleAgent,
 				Parts: []Part{{
 					Text:      message.Payload.Summary,
-					MediaType: "text/plain",
+					MediaType: mediaTypeTextPlain,
 				}},
 			},
 		},
@@ -332,8 +335,8 @@ func AgentCardFromSnapshot(baseURL string, snapshot contracts.SnapshotResponse, 
 			Streaming:         false,
 			PushNotifications: false,
 		},
-		DefaultInputModes:  []string{"text/plain", "application/json"},
-		DefaultOutputModes: []string{"application/json", "text/plain"},
+		DefaultInputModes:  []string{mediaTypeTextPlain, mediaTypeApplicationJSON},
+		DefaultOutputModes: []string{mediaTypeApplicationJSON, mediaTypeTextPlain},
 		Skills:             skillsFromSnapshot(snapshot),
 	}
 }
@@ -504,7 +507,7 @@ func messageFromRecord(message contracts.MessageRecord) Message {
 		Role:      RoleUser,
 		Parts: []Part{{
 			Text:      message.Payload.Body,
-			MediaType: "text/plain",
+			MediaType: mediaTypeTextPlain,
 		}},
 		Metadata: map[string]any{
 			"tc_message_ref":       message.MessageRef,
@@ -525,7 +528,7 @@ func artifactsFromSnapshot(message contracts.MessageRecord, artifacts []contract
 			Description: artifact.StorageRef,
 			Parts: []Part{{
 				Text:      artifact.StorageRef,
-				MediaType: "text/plain",
+				MediaType: mediaTypeTextPlain,
 				Metadata: map[string]any{
 					"tc_media_type": artifact.MediaType,
 					"tc_checksum":   artifact.Checksum,
@@ -557,8 +560,8 @@ func skillsFromSnapshot(snapshot contracts.SnapshotResponse) []AgentSkill {
 				Name:        name,
 				Description: "touch-connect capability " + name,
 				Tags:        []string{"touch-connect", "handoff", name},
-				InputModes:  []string{"text/plain", "application/json"},
-				OutputModes: []string{"application/json", "text/plain"},
+				InputModes:  []string{mediaTypeTextPlain, mediaTypeApplicationJSON},
+				OutputModes: []string{mediaTypeApplicationJSON, mediaTypeTextPlain},
 			})
 		}
 	}

@@ -182,34 +182,47 @@ func (a *Adapter) FetchNextDelivery(request application.DeliveryFetchRequest) (a
 		return application.DeliveryRecord{}, false, err
 	}
 	for _, message := range messages {
-		if !allowedSubjects[message.Subject] {
-			if nakErr := message.Nak(); nakErr != nil {
-				return application.DeliveryRecord{}, false, nakErr
-			}
-			continue
-		}
-		record := a.deliveryRecordFromMessage(message)
-		if record.DeliveryRef == "" {
-			if nakErr := message.Nak(); nakErr != nil {
-				return application.DeliveryRecord{}, false, nakErr
-			}
-			return application.DeliveryRecord{}, false, ErrDeliveryRefRequired
-		}
-		if record.MessageRef == "" {
-			if nakErr := message.Nak(); nakErr != nil {
-				return application.DeliveryRecord{}, false, nakErr
-			}
-			return application.DeliveryRecord{}, false, ErrMessageRefRequired
-		}
-		if err := a.trackPendingDelivery(record.DeliveryRef, message); err != nil {
-			if nakErr := message.Nak(); nakErr != nil {
-				return application.DeliveryRecord{}, false, nakErr
-			}
+		record, found, err := a.deliveryRecordForFetch(message, allowedSubjects)
+		if err != nil {
 			return application.DeliveryRecord{}, false, err
+		}
+		if !found {
+			continue
 		}
 		return record, true, nil
 	}
 	return application.DeliveryRecord{}, false, nil
+}
+
+func (a *Adapter) deliveryRecordForFetch(message *nats.Msg, allowedSubjects map[string]bool) (application.DeliveryRecord, bool, error) {
+	if !allowedSubjects[message.Subject] {
+		return application.DeliveryRecord{}, false, message.Nak()
+	}
+	record := a.deliveryRecordFromMessage(message)
+	if err := validateDeliveryRecord(record); err != nil {
+		return application.DeliveryRecord{}, false, nakThenReturn(message, err)
+	}
+	if err := a.trackPendingDelivery(record.DeliveryRef, message); err != nil {
+		return application.DeliveryRecord{}, false, nakThenReturn(message, err)
+	}
+	return record, true, nil
+}
+
+func validateDeliveryRecord(record application.DeliveryRecord) error {
+	if record.DeliveryRef == "" {
+		return ErrDeliveryRefRequired
+	}
+	if record.MessageRef == "" {
+		return ErrMessageRefRequired
+	}
+	return nil
+}
+
+func nakThenReturn(message *nats.Msg, err error) error {
+	if nakErr := message.Nak(); nakErr != nil {
+		return nakErr
+	}
+	return err
 }
 
 func (a *Adapter) AckDelivery(deliveryRef string) error {

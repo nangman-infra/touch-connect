@@ -2,32 +2,59 @@ package contracts
 
 import "testing"
 
-func TestPolicyEnumsParseKnownValues(t *testing.T) {
-	if value, err := ParsePolicyDecision("allow"); err != nil || value != PolicyDecisionAllow {
-		t.Fatalf("parse policy decision: value=%q err=%v", value, err)
+func TestPolicyEnumParsingAndString(t *testing.T) {
+	enumCases := []struct {
+		name  string
+		value string
+		parse func(string) (string, error)
+	}{
+		{"policy decision", "allow", func(v string) (string, error) {
+			parsed, err := ParsePolicyDecision(v)
+			return parsed.String(), err
+		}},
+		{"risk class", "high", func(v string) (string, error) {
+			parsed, err := ParseRiskClass(v)
+			return parsed.String(), err
+		}},
+		{"source risk", "medium", func(v string) (string, error) {
+			parsed, err := ParseSourceRisk(v)
+			return parsed.String(), err
+		}},
+		{"confidence band", "review", func(v string) (string, error) {
+			parsed, err := ParseConfidenceBand(v)
+			return parsed.String(), err
+		}},
+		{"quality gate", "warn", func(v string) (string, error) {
+			parsed, err := ParseQualityGateMode(v)
+			return parsed.String(), err
+		}},
 	}
-	if value, err := ParseRiskClass("blocked"); err != nil || value != RiskClassBlocked {
-		t.Fatalf("parse risk class: value=%q err=%v", value, err)
-	}
-	if value, err := ParseSourceRisk("hostile"); err != nil || value != SourceRiskHostile {
-		t.Fatalf("parse source risk: value=%q err=%v", value, err)
-	}
-	if value, err := ParseConfidenceBand("review"); err != nil || value != ConfidenceBandReview {
-		t.Fatalf("parse confidence band: value=%q err=%v", value, err)
+	for _, tc := range enumCases {
+		got, err := tc.parse(tc.value)
+		if err != nil {
+			t.Fatalf("%s parse returned error: %v", tc.name, err)
+		}
+		if got != tc.value {
+			t.Fatalf("%s String() = %q, want %q", tc.name, got, tc.value)
+		}
+		if _, err := tc.parse("bad"); err == nil {
+			t.Fatalf("%s should reject invalid value", tc.name)
+		}
 	}
 }
 
-func TestPolicyEnumsRejectUnknownValues(t *testing.T) {
-	if _, err := ParsePolicyDecision("maybe"); err == nil {
-		t.Fatal("expected invalid policy decision error")
+func TestAPIError(t *testing.T) {
+	cases := []struct {
+		err  APIError
+		want string
+	}{
+		{APIError{Response: ErrorResponse{Code: "quality_rejected", Message: "blocked"}}, "quality_rejected: blocked"},
+		{APIError{StatusCode: 502}, "api_status_502"},
+		{APIError{}, "api_error"},
 	}
-	if _, err := ParseRiskClass("medium"); err == nil {
-		t.Fatal("expected invalid risk class error")
-	}
-	if _, err := ParseSourceRisk("blocked"); err == nil {
-		t.Fatal("expected invalid source risk error")
-	}
-	if _, err := ParseConfidenceBand("low"); err == nil {
-		t.Fatal("expected invalid confidence band error")
+	for _, tc := range cases {
+		if got := tc.err.Error(); got != tc.want {
+			t.Fatalf("Error() = %q, want %q", got, tc.want)
+		}
 	}
 }

@@ -110,29 +110,47 @@ func artifactMatches(queryRef string, artifact contracts.ArtifactRecord) bool {
 func expandArtifactClosure(included map[string]bool, artifacts []contracts.ArtifactRecord, byVersion map[string]contracts.ArtifactRecord) {
 	changed := true
 	for changed {
-		changed = false
-		for versionRef := range included {
-			artifact := byVersion[versionRef]
-			for _, parentRef := range artifact.BasedOnArtifactVersionRefs {
-				if _, ok := byVersion[parentRef]; ok && !included[parentRef] {
-					included[parentRef] = true
-					changed = true
-				}
-			}
+		changed = includeArtifactParents(included, byVersion)
+		changed = includeArtifactChildren(included, artifacts) || changed
+	}
+}
+
+func includeArtifactParents(included map[string]bool, byVersion map[string]contracts.ArtifactRecord) bool {
+	changed := false
+	for versionRef := range included {
+		artifact, ok := byVersion[versionRef]
+		if !ok {
+			continue
 		}
-		for _, artifact := range artifacts {
-			if included[artifact.ArtifactVersionRef] {
-				continue
-			}
-			for _, parentRef := range artifact.BasedOnArtifactVersionRefs {
-				if included[parentRef] {
-					included[artifact.ArtifactVersionRef] = true
-					changed = true
-					break
-				}
+		for _, parentRef := range artifact.BasedOnArtifactVersionRefs {
+			if _, ok := byVersion[parentRef]; ok && !included[parentRef] {
+				included[parentRef] = true
+				changed = true
 			}
 		}
 	}
+	return changed
+}
+
+func includeArtifactChildren(included map[string]bool, artifacts []contracts.ArtifactRecord) bool {
+	changed := false
+	for _, artifact := range artifacts {
+		if included[artifact.ArtifactVersionRef] || !hasIncludedParent(artifact, included) {
+			continue
+		}
+		included[artifact.ArtifactVersionRef] = true
+		changed = true
+	}
+	return changed
+}
+
+func hasIncludedParent(artifact contracts.ArtifactRecord, included map[string]bool) bool {
+	for _, parentRef := range artifact.BasedOnArtifactVersionRefs {
+		if included[parentRef] {
+			return true
+		}
+	}
+	return false
 }
 
 func artifactLineageEdges(versions []contracts.ArtifactRecord, included map[string]bool) []contracts.ArtifactLineageEdge {

@@ -24,43 +24,81 @@ type Service struct {
 	settings    Settings
 }
 
-func NewService(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, qualityLedger QualityLedger, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
-	return NewServiceWithDeliveryAdapter(endpoints, messages, processing, readbacks, artifacts, governance, qualityLedger, nil, refs, projections, settings)
+type ServicePorts struct {
+	Endpoints   EndpointRegistry
+	Messages    MessageLedger
+	Processing  ProcessingLedger
+	Readbacks   ReadbackLedger
+	Artifacts   ArtifactLedger
+	Governance  GovernanceLedger
+	Quality     QualityLedger
+	Refs        RefAllocator
+	Projections ProjectionReader
 }
 
-func NewServiceWithDeliveryAdapter(endpoints EndpointRegistry, messages MessageLedger, processing ProcessingLedger, readbacks ReadbackLedger, artifacts ArtifactLedger, governance GovernanceLedger, qualityLedger QualityLedger, delivery DeliveryAdapter, refs RefAllocator, projections ProjectionReader, settings Settings) (*Service, error) {
-	if endpoints == nil {
+func PortsFromStore(store Store) ServicePorts {
+	return ServicePorts{
+		Endpoints:   store,
+		Messages:    store,
+		Processing:  store,
+		Readbacks:   store,
+		Artifacts:   store,
+		Governance:  store,
+		Quality:     store,
+		Refs:        store,
+		Projections: store,
+	}
+}
+
+func NewService(ports ServicePorts, settings Settings) (*Service, error) {
+	return NewServiceWithDeliveryAdapter(ports, nil, settings)
+}
+
+func NewServiceWithDeliveryAdapter(ports ServicePorts, delivery DeliveryAdapter, settings Settings) (*Service, error) {
+	if ports.Endpoints == nil {
 		return nil, errors.New("endpoint registry is required")
 	}
-	if messages == nil {
+	if ports.Messages == nil {
 		return nil, errors.New("message ledger is required")
 	}
-	if processing == nil {
+	if ports.Processing == nil {
 		return nil, errors.New("processing ledger is required")
 	}
-	if readbacks == nil {
+	if ports.Readbacks == nil {
 		return nil, errors.New("readback ledger is required")
 	}
-	if artifacts == nil {
+	if ports.Artifacts == nil {
 		return nil, errors.New("artifact ledger is required")
 	}
-	if governance == nil {
+	if ports.Governance == nil {
 		return nil, errors.New("governance ledger is required")
 	}
-	if qualityLedger == nil {
+	if ports.Quality == nil {
 		return nil, errors.New("quality ledger is required")
 	}
-	if refs == nil {
+	if ports.Refs == nil {
 		return nil, errors.New("ref allocator is required")
 	}
-	if projections == nil {
+	if ports.Projections == nil {
 		return nil, errors.New("projection reader is required")
 	}
 	accepted, err := settings.Validated()
 	if err != nil {
 		return nil, err
 	}
-	return &Service{endpoints: endpoints, messages: messages, processing: processing, readbacks: readbacks, artifacts: artifacts, governance: governance, quality: qualityLedger, delivery: delivery, refs: refs, projections: projections, settings: accepted}, nil
+	return &Service{
+		endpoints:   ports.Endpoints,
+		messages:    ports.Messages,
+		processing:  ports.Processing,
+		readbacks:   ports.Readbacks,
+		artifacts:   ports.Artifacts,
+		governance:  ports.Governance,
+		quality:     ports.Quality,
+		delivery:    delivery,
+		refs:        ports.Refs,
+		projections: ports.Projections,
+		settings:    accepted,
+	}, nil
 }
 
 func (s *Service) Health() contracts.HealthResponse {

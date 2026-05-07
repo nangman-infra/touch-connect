@@ -86,6 +86,12 @@ func TestAICLIExecutorHelper(t *testing.T) {
 		_, _ = os.Stdout.Write(data)
 	case "arg_echo":
 		_, _ = os.Stdout.WriteString(strings.Join(os.Args[marker+2:], "\n"))
+	case "stream_progress":
+		_, _ = os.Stdout.WriteString("WORKER_READBACK ready\n")
+		_, _ = os.Stdout.WriteString("WORKER_RESULT_READY done\n")
+	case "slow_partial":
+		_, _ = os.Stdout.WriteString("partial line\n")
+		time.Sleep(2 * time.Second)
 	default:
 		return
 	}
@@ -122,8 +128,8 @@ func TestAICLIExecutorValidationAndFailureResults(t *testing.T) {
 
 func TestAICLIExecutorStreamsProgressAndReadbackMarker(t *testing.T) {
 	executor, err := NewAICLIExecutor(AICLIExecutorOptions{
-		Command: "/bin/sh",
-		Args:    []string{"-c", "printf 'WORKER_READBACK ready\\nWORKER_RESULT_READY done\\n'"},
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestAICLIExecutorHelper", "--", "stream_progress"},
 		Timeout: time.Second,
 	})
 	if err != nil {
@@ -149,8 +155,8 @@ func TestAICLIExecutorStreamsProgressAndReadbackMarker(t *testing.T) {
 
 func TestAICLIExecutorReturnsPartialCompletedOnTimeout(t *testing.T) {
 	executor, err := NewAICLIExecutor(AICLIExecutorOptions{
-		Command: "/bin/sh",
-		Args:    []string{"-c", "printf 'partial line\\n'; sleep 2"},
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestAICLIExecutorHelper", "--", "slow_partial"},
 		Timeout: 20 * time.Millisecond,
 	})
 	if err != nil {

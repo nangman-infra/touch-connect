@@ -94,6 +94,7 @@ func (s *Service) ReplayDeadLetter(req contracts.DLQReplayRequest) (contracts.DL
 		SenderEndpointRef:    original.SenderEndpointRef,
 		TargetCapability:     original.TargetCapability,
 		TargetEndpointRef:    original.TargetEndpointRef,
+		PreferredEndpointRef: original.PreferredEndpointRef,
 		DependsOnMessageRefs: append([]string(nil), original.DependsOnMessageRefs...),
 		Payload:              original.Payload,
 		Constraints:          original.Constraints,

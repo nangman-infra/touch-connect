@@ -20,6 +20,18 @@ type FreshnessRecord struct {
 	Source      string `json:"source"`
 }
 
+type EventRecord struct {
+	Kind             string `json:"kind"`
+	Ref              string `json:"ref,omitempty"`
+	MessageRef       string `json:"message_ref,omitempty"`
+	AttemptRef       string `json:"attempt_ref,omitempty"`
+	EndpointRef      string `json:"endpoint_ref,omitempty"`
+	TargetCapability string `json:"target_capability,omitempty"`
+	TaskRef          string `json:"task_ref,omitempty"`
+	State            string `json:"state,omitempty"`
+	Summary          string `json:"summary,omitempty"`
+}
+
 type EndpointRecord struct {
 	EndpointRef       string                `json:"endpoint_ref"`
 	DisplayName       string                `json:"display_name"`
@@ -43,6 +55,7 @@ type MessageRecord struct {
 	SenderEndpointRef     string            `json:"sender_endpoint_ref"`
 	TargetCapability      string            `json:"target_capability"`
 	TargetEndpointRef     string            `json:"target_endpoint_ref,omitempty"`
+	PreferredEndpointRef  string            `json:"preferred_endpoint_ref,omitempty"`
 	DependsOnMessageRefs  []string          `json:"depends_on_message_refs,omitempty"`
 	Payload               Payload           `json:"payload"`
 	Constraints           []Constraint      `json:"constraints"`

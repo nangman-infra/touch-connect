@@ -10,7 +10,7 @@ func (s *Store) ClaimNextMessage(claim domain.ClaimNextRequest) (domain.ClaimRes
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, state := range []string{domain.MessageStateTakeoverCandidate, domain.MessageStateAvailable} {
-		message, ok := s.nextEligibleMessage(state, claim.Endpoint)
+		message, ok := s.nextEligibleMessage(state, claim)
 		if !ok {
 			continue
 		}
@@ -20,7 +20,7 @@ func (s *Store) ClaimNextMessage(claim domain.ClaimNextRequest) (domain.ClaimRes
 	return domain.ClaimResult{}, false, nil
 }
 
-func (s *Store) nextEligibleMessage(state string, endpoint domain.Endpoint) (domain.Message, bool) {
+func (s *Store) nextEligibleMessage(state string, claim domain.ClaimNextRequest) (domain.Message, bool) {
 	refs := make([]string, 0, len(s.messages))
 	for messageRef, message := range s.messages {
 		if message.State == state {
@@ -34,7 +34,8 @@ func (s *Store) nextEligibleMessage(state string, endpoint domain.Endpoint) (dom
 	}
 	for _, messageRef := range refs {
 		message := s.messages[messageRef]
-		if domain.MessageRoutableToEndpoint(message, endpoint) && domain.MessageDependenciesCompleted(message, states) {
+		if domain.MessageClaimableByEndpoint(message, claim.Endpoint, domain.PreferredEndpointOnlineForMessage(message, claim.PreferredEndpoints)) &&
+			domain.MessageDependenciesCompleted(message, states) {
 			return message, true
 		}
 	}

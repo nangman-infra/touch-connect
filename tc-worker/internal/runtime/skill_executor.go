@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
 	"github.com/nangman-infra/touch-connect/internal/communication/skills"
@@ -12,34 +13,47 @@ import (
 type SkillExecutorOptions struct {
 	Skills  []contracts.SkillDefinition
 	Backend WorkerExecutor
+	Reload  func() ([]contracts.SkillDefinition, error)
 }
 
 type SkillExecutor struct {
 	skills  []contracts.SkillDefinition
 	backend WorkerExecutor
+	reload  func() ([]contracts.SkillDefinition, error)
+	mu      sync.RWMutex
 }
 
 func NewSkillExecutor(options SkillExecutorOptions) (*SkillExecutor, error) {
-	if len(options.Skills) == 0 {
-		return nil, errors.New("at least one skill is required")
-	}
-	loaded := make([]contracts.SkillDefinition, 0, len(options.Skills))
-	for _, skill := range options.Skills {
-		accepted, err := skills.Validate(skill)
+	loaded := options.Skills
+	if len(loaded) == 0 && options.Reload != nil {
+		var err error
+		loaded, err = options.Reload()
 		if err != nil {
 			return nil, err
 		}
-		loaded = append(loaded, accepted)
+	}
+	accepted, err := validateSkillDefinitions(loaded)
+	if err != nil {
+		return nil, err
 	}
 	backend := options.Backend
 	if backend == nil {
 		backend = EchoExecutor{}
 	}
-	return &SkillExecutor{skills: loaded, backend: backend}, nil
+	return &SkillExecutor{skills: accepted, backend: backend, reload: options.Reload}, nil
 }
 
 func (e *SkillExecutor) Execute(ctx context.Context, input ExecutionInput) (ExecutionResult, error) {
-	skill, ok := skills.MatchCapability(e.skills, input.TargetCapability)
+	loaded, err := e.currentSkills()
+	if err != nil {
+		return ExecutionResult{
+			Outcome:           ExecutionOutcomeFailed,
+			Summary:           "skill reload failed",
+			FailureReasonCode: "skill_reload_failed",
+			Stderr:            err.Error(),
+		}, nil
+	}
+	skill, ok := skills.MatchCapability(loaded, input.TargetCapability)
 	if !ok {
 		return ExecutionResult{
 			Outcome:           ExecutionOutcomeFailed,
@@ -59,6 +73,75 @@ func (e *SkillExecutor) Execute(ctx context.Context, input ExecutionInput) (Exec
 		result.Stdout = "used_skill_ref=" + skill.SkillRef + "\n" + result.Stdout
 	}
 	return result, nil
+}
+
+func (e *SkillExecutor) RefreshCapabilities(_ context.Context) ([]contracts.Capability, error) {
+	loaded, err := e.currentSkills()
+	if err != nil {
+		return nil, err
+	}
+	return capabilitiesFromSkillDefinitions(loaded), nil
+}
+
+func (e *SkillExecutor) currentSkills() ([]contracts.SkillDefinition, error) {
+	if e.reload == nil {
+		return e.snapshotSkills(), nil
+	}
+	return e.reloadSkills()
+}
+
+func (e *SkillExecutor) snapshotSkills() []contracts.SkillDefinition {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return append([]contracts.SkillDefinition(nil), e.skills...)
+}
+
+func (e *SkillExecutor) reloadSkills() ([]contracts.SkillDefinition, error) {
+	loaded, err := e.reload()
+	if err != nil {
+		return nil, err
+	}
+	accepted, err := validateSkillDefinitions(loaded)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	e.skills = accepted
+	e.mu.Unlock()
+	return append([]contracts.SkillDefinition(nil), accepted...), nil
+}
+
+func validateSkillDefinitions(items []contracts.SkillDefinition) ([]contracts.SkillDefinition, error) {
+	if len(items) == 0 {
+		return nil, errors.New("at least one skill is required")
+	}
+	loaded := make([]contracts.SkillDefinition, 0, len(items))
+	for _, skill := range items {
+		accepted, err := skills.Validate(skill)
+		if err != nil {
+			return nil, err
+		}
+		loaded = append(loaded, accepted)
+	}
+	return loaded, nil
+}
+
+func capabilitiesFromSkillDefinitions(items []contracts.SkillDefinition) []contracts.Capability {
+	capabilities := make([]contracts.Capability, 0)
+	seen := map[string]struct{}{}
+	for _, skill := range items {
+		for _, name := range skill.Capabilities {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			capabilities = append(capabilities, contracts.Capability{
+				Name:           name,
+				ExecutionHints: []string{"checkpoint_progress", "skill_guided", "ai_execution"},
+			})
+		}
+	}
+	return capabilities
 }
 
 func skillAugmentedBody(skill contracts.SkillDefinition, input ExecutionInput) string {

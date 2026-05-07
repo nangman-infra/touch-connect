@@ -113,6 +113,7 @@ func TestHandlerGetRoutes(t *testing.T) {
 		"/readyz",
 		"/version",
 		"/v1/snapshot",
+		"/v1/events?once=true",
 		"/v1/endpoints",
 		"/v1/endpoints/inspect?ref=tc://endpoint/worker",
 		"/v1/capabilities",

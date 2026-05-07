@@ -204,6 +204,66 @@ func TestWorkerReportsProgressDuringLongExecution(t *testing.T) {
 	}
 }
 
+func TestTaskCancelPreemptsRunningWorkerExecution(t *testing.T) {
+	settings := tcserver.DefaultSettings()
+	settings.AttemptLeaseDuration = 20 * time.Millisecond
+	server, err := tcserver.NewInMemoryServerWithSettings(settings)
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	taskRef := "tc://task/cancel_preempts_worker"
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	executor := executorFunc(func(ctx context.Context, _ tcworker.ExecutionInput) (tcworker.ExecutionResult, error) {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return tcworker.ExecutionResult{}, ctx.Err()
+	})
+	worker := tcworker.NewHTTPRuntimeWithExecutor(httpServer.URL, httpServer.Client(), tcworker.DefaultConfig(), executor)
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	ingressTaskMessage(t, httpServer, taskRef)
+
+	done := make(chan processOutcome, 1)
+	go func() {
+		result, err := worker.ProcessNext(context.Background())
+		done <- processOutcome{Result: result, Err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatalf("worker executor did not start")
+	}
+	var cancel contracts.TaskCommandResponse
+	postJSON(t, httpServer.URL+"/v1/control/tasks/cancel", httpServer.Client(), contracts.TaskCommandRequest{TaskRef: taskRef}, http.StatusAccepted, &cancel)
+	if cancel.AffectedMessages != 1 {
+		t.Fatalf("expected one canceled message, got %+v", cancel)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatalf("running worker was not preempted after task cancel")
+	}
+	select {
+	case outcome := <-done:
+		if outcome.Err != nil {
+			t.Fatalf("process next should drop canceled attempt gracefully: %v", outcome.Err)
+		}
+		if !outcome.Result.Dropped || outcome.Result.DropReason == "" {
+			t.Fatalf("expected dropped canceled attempt result, got %+v", outcome.Result)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("process next did not return after cancellation")
+	}
+	if snapshot := server.Snapshot(); snapshot.Messages[0].State != "canceled" || snapshot.Attempts[0].State != "canceled" {
+		t.Fatalf("expected canceled message and attempt, got %+v", snapshot)
+	}
+}
+
 func TestWorkerSubmitsReadbackWhenExecutorStreamsMarker(t *testing.T) {
 	server := tcserver.NewInMemoryServer()
 	httpServer := httptest.NewServer(server.Handler())
@@ -236,6 +296,11 @@ func TestWorkerSubmitsReadbackWhenExecutorStreamsMarker(t *testing.T) {
 	if len(readbacks) != 1 || readbacks[0].Summary != "readback marker observed during execution" {
 		t.Fatalf("expected exactly one marker readback, got %+v", readbacks)
 	}
+}
+
+type processOutcome struct {
+	Result tcworker.ProcessResult
+	Err    error
 }
 
 func TestWorkerCanCreateFollowUpMessageOnCompletion(t *testing.T) {
@@ -286,6 +351,24 @@ func TestWorkerCanCreateFollowUpMessageOnCompletion(t *testing.T) {
 	if !followUpFound || followUpState != "available" || len(followUpDependsOn) != 1 || followUpDependsOn[0] != parent.MessageRef {
 		t.Fatalf("expected available follow-up depending on parent, found=%t state=%s depends_on=%v", followUpFound, followUpState, followUpDependsOn)
 	}
+}
+
+func ingressTaskMessage(t *testing.T, server *httptest.Server, taskRef string) contracts.MessageIngressResponse {
+	t.Helper()
+	req := contracts.MessageIngressRequest{
+		SenderEndpointRef: "tc://endpoint/ep_local_worker",
+		TargetCapability:  "code.change",
+		CorrelationRef:    taskRef,
+		Payload: contracts.Payload{
+			Summary:    "cancelable worker execution",
+			Body:       "Keep running until canceled.",
+			References: []contracts.Reference{},
+		},
+		Constraints: []contracts.Constraint{},
+	}
+	var accepted contracts.MessageIngressResponse
+	postJSON(t, server.URL+"/v1/messages", server.Client(), req, http.StatusAccepted, &accepted)
+	return accepted
 }
 
 func TestWorkerExecutorCanBlockForMissingFields(t *testing.T) {

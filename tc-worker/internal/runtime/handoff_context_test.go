@@ -61,6 +61,39 @@ func TestHandoffContextIncludesTaskMessagesAndArtifacts(t *testing.T) {
 	}
 }
 
+func TestHandoffContextIncludesResumeArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "partial.json")
+	if err := os.WriteFile(partialPath, []byte(`{"summary":"partial work","stdout":"already changed files A and B","stderr":"timeout","outcome":"partial_completed"}`), 0o644); err != nil {
+		t.Fatalf("write partial artifact: %v", err)
+	}
+	claim := contracts.ClaimMessageResponse{
+		MessageRef:           "tc://message/current",
+		CorrelationRef:       "tc://task/resume",
+		Takeover:             true,
+		ResumeSummary:        "previous attempt timed out after partial work",
+		ResumeArtifactRefs:   []string{"tc://artifact-version/partial"},
+		TargetCapability:     "code.change",
+		RedeliveryCount:      1,
+		LastCheckpointRef:    "tc://checkpoint/previous",
+		ReadbackRequired:     true,
+		TargetEndpointRef:    "",
+		PreferredEndpointRef: "",
+	}
+	context := handoffContextFromSnapshot(claim, contracts.SnapshotResponse{
+		Artifacts: []contracts.ArtifactRecord{
+			{ArtifactVersionRef: "tc://artifact-version/partial", StorageRef: "file://" + partialPath},
+			{ArtifactVersionRef: "tc://artifact-version/unrelated"},
+		},
+	})
+	if len(context.Artifacts) != 1 {
+		t.Fatalf("expected resume artifact, got %+v", context.Artifacts)
+	}
+	if context.Artifacts[0].Summary != "partial work" || !strings.Contains(context.Artifacts[0].Stdout, "already changed") {
+		t.Fatalf("expected parsed resume artifact content, got %+v", context.Artifacts[0])
+	}
+}
+
 func TestHandoffReferenceAndStorageHelpers(t *testing.T) {
 	messages, artifacts := referencedHandoffRefs([]contracts.Reference{
 		{Ref: " tc://message/one ", Type: ""},

@@ -63,6 +63,7 @@ type Message struct {
 	SenderEndpointRef    string
 	TargetCapability     string
 	TargetEndpointRef    string
+	PreferredEndpointRef string
 	DependsOnMessageRefs []string
 	Payload              contracts.Payload
 	Constraints          []contracts.Constraint
@@ -209,12 +210,13 @@ type ClaimRequest struct {
 }
 
 type ClaimNextRequest struct {
-	Endpoint       Endpoint
-	AttemptRef     string
-	DeadLetterRef  string
-	LeaseExpiresAt time.Time
-	Now            time.Time
-	MaxRedelivery  int
+	Endpoint           Endpoint
+	AttemptRef         string
+	DeadLetterRef      string
+	LeaseExpiresAt     time.Time
+	Now                time.Time
+	MaxRedelivery      int
+	PreferredEndpoints map[string]Endpoint
 }
 
 type Snapshot struct {

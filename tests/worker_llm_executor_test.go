@@ -86,6 +86,50 @@ func TestLLMExecutorTurnsProviderFailureIntoFailedResult(t *testing.T) {
 	}
 }
 
+func TestLLMExecutorIncludesResumeArtifactContext(t *testing.T) {
+	var seenRequest map[string]any
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&seenRequest); err != nil {
+			t.Fatalf("decode provider request: %v", err)
+		}
+		writeOpenAIResponsesText(w, "continued from partial output")
+	}))
+	defer provider.Close()
+
+	executor, err := tcworker.NewLLMExecutor(tcworker.LLMExecutorOptions{
+		BaseURL: provider.URL,
+		APIKey:  "test-key",
+		Model:   "test-model",
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("create LLM executor: %v", err)
+	}
+	input := llmExecutionInput()
+	input.Takeover = true
+	input.LastCheckpointRef = "tc://checkpoint/previous"
+	input.ResumeSummary = "previous attempt timed out after partial work"
+	input.ResumeArtifactRefs = []string{"tc://artifact-version/partial"}
+	input.HandoffContext.Artifacts = append(input.HandoffContext.Artifacts, tcworker.HandoffArtifact{
+		ArtifactVersionRef: "tc://artifact-version/partial",
+		Summary:            "partial work",
+		Stdout:             "already changed files A and B",
+		Stderr:             "timeout",
+	})
+	if _, err := executor.Execute(context.Background(), input); err != nil {
+		t.Fatalf("execute LLM: %v", err)
+	}
+	prompt, ok := seenRequest["input"].(string)
+	if !ok {
+		t.Fatalf("expected prompt input, got %+v", seenRequest)
+	}
+	for _, want := range []string{"takeover: true", "resume_summary: previous attempt timed out", "tc://artifact-version/partial", "already changed files A and B"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to include %q, got %s", want, prompt)
+		}
+	}
+}
+
 func TestWorkerEnvSelectsLLMExecutorAndCapabilities(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeOpenAIResponsesText(w, "env selected LLM executor")
@@ -276,6 +320,67 @@ func TestSkillExecutorAddsGuidanceBeforeCallingBackend(t *testing.T) {
 	}
 	if !strings.Contains(seen.Payload.Body, "SKILL.md instructions") || !strings.Contains(seen.Payload.Body, "Check layout geometry") || !strings.Contains(seen.Payload.Body, "Original message body") {
 		t.Fatalf("expected skill guidance to be injected into backend input, got %q", seen.Payload.Body)
+	}
+}
+
+func TestSkillExecutorReloadsSkillsBeforeExecution(t *testing.T) {
+	codeSkill := contracts.SkillDefinition{
+		SkillRef:     "tc://skill/code-worker",
+		Name:         "Code Worker",
+		Kind:         contracts.SkillKindGuidance,
+		Capabilities: []string{"code.change"},
+		Body:         "Change code safely.",
+	}
+	reviewSkill := contracts.SkillDefinition{
+		SkillRef:     "tc://skill/review-worker",
+		Name:         "Review Worker",
+		Kind:         contracts.SkillKindGuidance,
+		Capabilities: []string{"ai.review"},
+		Body:         "Review work carefully.",
+	}
+	loaded := []contracts.SkillDefinition{codeSkill}
+	backend := executorFunc(func(_ context.Context, input tcworker.ExecutionInput) (tcworker.ExecutionResult, error) {
+		return tcworker.ExecutionResult{
+			Outcome: tcworker.ExecutionOutcomeCompleted,
+			Summary: "backend completed",
+			Stdout:  input.Payload.Body,
+		}, nil
+	})
+	executor, err := tcworker.NewSkillExecutor(tcworker.SkillExecutorOptions{
+		Reload: func() ([]contracts.SkillDefinition, error) {
+			return append([]contracts.SkillDefinition(nil), loaded...), nil
+		},
+		Backend: backend,
+	})
+	if err != nil {
+		t.Fatalf("create reloadable skill executor: %v", err)
+	}
+
+	input := llmExecutionInput()
+	input.TargetCapability = "code.change"
+	result, err := executor.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("execute initial skill: %v", err)
+	}
+	if len(result.UsedSkillRefs) != 1 || result.UsedSkillRefs[0] != codeSkill.SkillRef {
+		t.Fatalf("expected initial code skill, got %+v", result)
+	}
+
+	loaded = []contracts.SkillDefinition{reviewSkill}
+	input.TargetCapability = "ai.review"
+	result, err = executor.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("execute reloaded skill: %v", err)
+	}
+	if len(result.UsedSkillRefs) != 1 || result.UsedSkillRefs[0] != reviewSkill.SkillRef {
+		t.Fatalf("expected reloaded review skill, got %+v", result)
+	}
+	capabilities, err := executor.RefreshCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("refresh capabilities: %v", err)
+	}
+	if len(capabilities) != 1 || capabilities[0].Name != "ai.review" {
+		t.Fatalf("expected reloaded advertised capability, got %+v", capabilities)
 	}
 }
 

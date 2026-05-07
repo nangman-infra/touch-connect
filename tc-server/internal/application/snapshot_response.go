@@ -58,6 +58,7 @@ func messageRecords(items []domain.Message) []contracts.MessageRecord {
 			SenderEndpointRef:    item.SenderEndpointRef,
 			TargetCapability:     item.TargetCapability,
 			TargetEndpointRef:    item.TargetEndpointRef,
+			PreferredEndpointRef: item.PreferredEndpointRef,
 			DependsOnMessageRefs: append([]string(nil), item.DependsOnMessageRefs...),
 			Payload:              item.Payload,
 			Constraints:          item.Constraints,

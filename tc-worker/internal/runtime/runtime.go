@@ -52,6 +52,10 @@ type Runtime struct {
 	readbackSubmittedByAttempt map[string]bool
 }
 
+type dynamicCapabilityProvider interface {
+	RefreshCapabilities(context.Context) ([]contracts.Capability, error)
+}
+
 type MissingField struct {
 	Name   string
 	Reason string
@@ -120,6 +124,11 @@ func (r *Runtime) Heartbeat(ctx context.Context) error {
 }
 
 func (r *Runtime) sendHeartbeat(ctx context.Context, state string) error {
+	if state == "online" {
+		if err := r.refreshDynamicCapabilities(ctx); err != nil {
+			return err
+		}
+	}
 	attemptRef, lastActivityAt, progressSummary := r.progressSnapshot()
 	_, err := r.client.HeartbeatEndpoint(ctx, r.config.EndpointRef, contracts.EndpointHeartbeatRequest{
 		EndpointRef:       r.config.EndpointRef,
@@ -130,6 +139,47 @@ func (r *Runtime) sendHeartbeat(ctx context.Context, state string) error {
 		ProgressSummary:   progressSummary,
 	})
 	return err
+}
+
+func (r *Runtime) refreshDynamicCapabilities(ctx context.Context) error {
+	provider, ok := r.executor.(dynamicCapabilityProvider)
+	if !ok {
+		return nil
+	}
+	capabilities, err := provider.RefreshCapabilities(ctx)
+	if err != nil {
+		r.markProgress(r.currentAttempt(), "skill reload failed: "+err.Error())
+		return nil
+	}
+	if sameCapabilities(r.config.Capabilities, capabilities) {
+		return nil
+	}
+	r.config.Capabilities = append([]contracts.Capability(nil), capabilities...)
+	_, err = r.client.AdvertiseCapabilities(ctx, r.config.EndpointRef, contracts.CapabilityAdvertisementRequest{
+		Capabilities: r.config.Capabilities,
+	})
+	return err
+}
+
+func (r *Runtime) currentAttempt() string {
+	attemptRef, _, _ := r.progressSnapshot()
+	return attemptRef
+}
+
+func sameCapabilities(a []contracts.Capability, b []contracts.Capability) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	left := map[string]struct{}{}
+	for _, item := range a {
+		left[item.Name] = struct{}{}
+	}
+	for _, item := range b {
+		if _, ok := left[item.Name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Runtime) ProcessMessage(ctx context.Context, messageRef string) (string, error) {

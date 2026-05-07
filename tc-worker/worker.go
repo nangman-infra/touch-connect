@@ -361,7 +361,7 @@ func skillExecutorFromEnv() (WorkerExecutor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewSkillExecutor(SkillExecutorOptions{Skills: loaded, Backend: backend})
+	return NewSkillExecutor(SkillExecutorOptions{Skills: loaded, Backend: backend, Reload: skillsFromEnv})
 }
 
 func backendExecutorFromEnv(kind string) (WorkerExecutor, error) {

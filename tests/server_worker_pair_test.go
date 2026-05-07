@@ -196,6 +196,54 @@ func TestTargetEndpointRoutesMessageToSelectedWorker(t *testing.T) {
 	}
 }
 
+func TestPreferredEndpointRoutesToPreferredWorkerAndFallsBack(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	firstConfig := tcworker.DefaultConfig()
+	secondConfig := tcworker.DefaultConfig()
+	secondConfig.EndpointRef = "tc://endpoint/ep_preferred_worker"
+	secondConfig.DisplayName = "preferred worker"
+	secondConfig.ActorID = "actor.preferred"
+	first := tcworker.NewHTTPRuntime(httpServer.URL, httpServer.Client(), firstConfig)
+	second := tcworker.NewHTTPRuntime(httpServer.URL, httpServer.Client(), secondConfig)
+	if err := first.Register(context.Background()); err != nil {
+		t.Fatalf("register first worker: %v", err)
+	}
+	if err := second.Register(context.Background()); err != nil {
+		t.Fatalf("register second worker: %v", err)
+	}
+
+	preferred := ingressPreferredMessage(t, httpServer, "tc://message/msg_preferred_001", secondConfig.EndpointRef)
+	firstResult, err := first.ProcessNext(context.Background())
+	if err != nil {
+		t.Fatalf("first process next: %v", err)
+	}
+	if !firstResult.Empty {
+		t.Fatalf("expected non-preferred worker to skip while preferred worker is online, got %+v", firstResult)
+	}
+	secondResult, err := second.ProcessNext(context.Background())
+	if err != nil {
+		t.Fatalf("second process next: %v", err)
+	}
+	if !secondResult.Completed || secondResult.MessageRef != preferred.MessageRef {
+		t.Fatalf("expected preferred worker to complete message, got %+v", secondResult)
+	}
+
+	if err := second.MarkOffline(context.Background()); err != nil {
+		t.Fatalf("mark preferred offline: %v", err)
+	}
+	fallback := ingressPreferredMessage(t, httpServer, "tc://message/msg_preferred_002", secondConfig.EndpointRef)
+	fallbackResult, err := first.ProcessNext(context.Background())
+	if err != nil {
+		t.Fatalf("fallback process next: %v", err)
+	}
+	if !fallbackResult.Completed || fallbackResult.MessageRef != fallback.MessageRef {
+		t.Fatalf("expected fallback worker to complete message after preferred offline, got %+v", fallbackResult)
+	}
+}
+
 func TestDependsOnMessageBlocksClaimUntilDependencyCompletes(t *testing.T) {
 	server := tcserver.NewInMemoryServer()
 	httpServer := httptest.NewServer(server.Handler())
@@ -292,6 +340,15 @@ func ingressTargetedMessage(t *testing.T, server *httptest.Server, endpointRef s
 	t.Helper()
 	req := baseWorkerIngressRequest("tc://message/msg_targeted", nil)
 	req.TargetEndpointRef = endpointRef
+	var accepted contracts.MessageIngressResponse
+	postJSON(t, server.URL+"/v1/messages", server.Client(), req, http.StatusAccepted, &accepted)
+	return accepted
+}
+
+func ingressPreferredMessage(t *testing.T, server *httptest.Server, messageRef string, endpointRef string) contracts.MessageIngressResponse {
+	t.Helper()
+	req := baseWorkerIngressRequest(messageRef, nil)
+	req.PreferredEndpointRef = endpointRef
 	var accepted contracts.MessageIngressResponse
 	postJSON(t, server.URL+"/v1/messages", server.Client(), req, http.StatusAccepted, &accepted)
 	return accepted

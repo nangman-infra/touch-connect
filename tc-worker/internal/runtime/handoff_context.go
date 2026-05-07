@@ -20,6 +20,12 @@ const (
 func handoffContextFromSnapshot(claim contracts.ClaimMessageResponse, snapshot contracts.SnapshotResponse) HandoffContext {
 	taskRef := strings.TrimSpace(claim.CorrelationRef)
 	referencedMessages, referencedArtifacts := referencedHandoffRefs(claim.Payload.References)
+	for _, ref := range claim.ResumeArtifactRefs {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			referencedArtifacts[ref] = struct{}{}
+		}
+	}
 	messageRefs := map[string]struct{}{}
 	context := HandoffContext{TaskRef: taskRef}
 	context.Messages = handoffMessagesFromSnapshot(claim, snapshot, taskRef, referencedMessages, messageRefs)

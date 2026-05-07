@@ -1,10 +1,12 @@
 package controlapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,10 +45,60 @@ func (c *Client) Snapshot(ctx context.Context) (contracts.SnapshotResponse, erro
 	return out, err
 }
 
+func (c *Client) StreamEvents(ctx context.Context, taskRef string, capability string, interval time.Duration, yield func(contracts.EventRecord) error) error {
+	query := url.Values{}
+	if taskRef != "" {
+		query.Set("task", taskRef)
+	}
+	if capability != "" {
+		query.Set("capability", capability)
+	}
+	if interval > 0 {
+		query.Set("interval", interval.String())
+	}
+	path := "/v1/events"
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	streamClient := *c.client
+	streamClient.Timeout = 0
+	res, err := streamClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return decodeControlError(res)
+	}
+	return scanSSEEvents(res.Body, yield)
+}
+
 func (c *Client) Endpoints(ctx context.Context) ([]contracts.EndpointRecord, error) {
 	var out []contracts.EndpointRecord
 	err := c.get(ctx, "/v1/endpoints", &out)
 	return out, err
+}
+
+func scanSSEEvents(reader io.Reader, yield func(contracts.EventRecord) error) error {
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		var event contracts.EventRecord
+		if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &event); err != nil {
+			return err
+		}
+		if err := yield(event); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
 }
 
 func (c *Client) Endpoint(ctx context.Context, ref string) (contracts.EndpointRecord, error) {
@@ -215,17 +267,21 @@ func (c *Client) do(req *http.Request, target any) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= http.StatusBadRequest {
-		var apiErr contracts.ErrorResponse
-		if err := json.NewDecoder(res.Body).Decode(&apiErr); err == nil && apiErr.Code != "" {
-			return contracts.APIError{StatusCode: res.StatusCode, Response: apiErr}
-		}
-		return contracts.APIError{
-			StatusCode: res.StatusCode,
-			Response: contracts.ErrorResponse{
-				Code:    fmt.Sprintf("control_status_%d", res.StatusCode),
-				Message: fmt.Sprintf("control returned status %d", res.StatusCode),
-			},
-		}
+		return decodeControlError(res)
 	}
 	return json.NewDecoder(res.Body).Decode(target)
+}
+
+func decodeControlError(res *http.Response) error {
+	var apiErr contracts.ErrorResponse
+	if err := json.NewDecoder(res.Body).Decode(&apiErr); err == nil && apiErr.Code != "" {
+		return contracts.APIError{StatusCode: res.StatusCode, Response: apiErr}
+	}
+	return contracts.APIError{
+		StatusCode: res.StatusCode,
+		Response: contracts.ErrorResponse{
+			Code:    fmt.Sprintf("control_status_%d", res.StatusCode),
+			Message: fmt.Sprintf("control returned status %d", res.StatusCode),
+		},
+	}
 }

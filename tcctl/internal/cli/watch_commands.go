@@ -32,6 +32,7 @@ func (r Runtime) watchTask(ctx context.Context, args []string) error {
 	flags := commandFlagSet("task watch <task_ref> [flags]", r.stderr)
 	interval := flags.Duration("interval", time.Second, "poll interval")
 	once := flags.Bool("once", false, "print current matching events once and exit")
+	stream := flags.Bool("stream", true, "use tc-control server-sent event stream")
 	if helpOnly(args) {
 		flags.Usage()
 		return errHelpRequested
@@ -49,6 +50,7 @@ func (r Runtime) watchTask(ctx context.Context, args []string) error {
 		TaskRef:  args[0],
 		Interval: *interval,
 		Once:     *once,
+		Stream:   *stream,
 	})
 }
 
@@ -58,6 +60,7 @@ func (r Runtime) tailMessages(ctx context.Context, args []string) error {
 	capability := flags.String("capability", "", "target capability filter")
 	interval := flags.Duration("interval", time.Second, "poll interval")
 	once := flags.Bool("once", false, "print current matching events once and exit")
+	stream := flags.Bool("stream", true, "use tc-control server-sent event stream")
 	if err := parseCommandFlags(flags, args); err != nil {
 		return err
 	}
@@ -69,6 +72,7 @@ func (r Runtime) tailMessages(ctx context.Context, args []string) error {
 		Capability: *capability,
 		Interval:   *interval,
 		Once:       *once,
+		Stream:     *stream,
 	})
 }
 
@@ -77,9 +81,13 @@ type watchOptions struct {
 	Capability string
 	Interval   time.Duration
 	Once       bool
+	Stream     bool
 }
 
 func (r Runtime) watchSnapshots(ctx context.Context, options watchOptions) error {
+	if options.Stream && !options.Once {
+		return r.watchEventStream(ctx, options)
+	}
 	state := newWatchState()
 	for {
 		snapshot, err := r.client.Snapshot(ctx)
@@ -99,6 +107,45 @@ func (r Runtime) watchSnapshots(ctx context.Context, options watchOptions) error
 		case <-time.After(options.Interval):
 		}
 	}
+}
+
+func (r Runtime) watchEventStream(ctx context.Context, options watchOptions) error {
+	return r.client.StreamEvents(ctx, options.TaskRef, options.Capability, options.Interval, func(event contracts.EventRecord) error {
+		fmt.Fprintln(r.stdout, formatStreamEvent(event))
+		return nil
+	})
+}
+
+func formatStreamEvent(event contracts.EventRecord) string {
+	if event.Kind == "" {
+		event.Kind = "event"
+	}
+	parts := []string{event.Kind}
+	if event.Ref != "" {
+		parts = append(parts, "ref="+event.Ref)
+	}
+	if event.MessageRef != "" && event.MessageRef != event.Ref {
+		parts = append(parts, "msg="+event.MessageRef)
+	}
+	if event.AttemptRef != "" && event.AttemptRef != event.Ref {
+		parts = append(parts, "attempt="+event.AttemptRef)
+	}
+	if event.EndpointRef != "" {
+		parts = append(parts, "endpoint="+event.EndpointRef)
+	}
+	if event.TargetCapability != "" {
+		parts = append(parts, "cap="+event.TargetCapability)
+	}
+	if event.State != "" {
+		parts = append(parts, "state="+event.State)
+	}
+	if event.TaskRef != "" {
+		parts = append(parts, "task="+event.TaskRef)
+	}
+	if event.Summary != "" {
+		parts = append(parts, fmt.Sprintf("summary=%q", event.Summary))
+	}
+	return strings.Join(parts, " ")
 }
 
 func diffWatchSnapshot(state watchState, snapshot contracts.SnapshotResponse, options watchOptions) []string {

@@ -12,21 +12,22 @@ import (
 )
 
 type managerOptions struct {
-	TaskRef           string
-	Capability        string
-	Summary           string
-	Body              string
-	BodyFile          string
-	Sender            string
-	MessageRef        string
-	TargetEndpointRef string
-	DependsOn         string
-	QualityGate       contracts.QualityGateMode
-	ReadbackRequired  bool
-	Send              bool
-	Watch             bool
-	Once              bool
-	Interval          time.Duration
+	TaskRef              string
+	Capability           string
+	Summary              string
+	Body                 string
+	BodyFile             string
+	Sender               string
+	MessageRef           string
+	TargetEndpointRef    string
+	PreferredEndpointRef string
+	DependsOn            string
+	QualityGate          contracts.QualityGateMode
+	ReadbackRequired     bool
+	Send                 bool
+	Watch                bool
+	Once                 bool
+	Interval             time.Duration
 }
 
 func (r Runtime) manager(ctx context.Context, args []string) error {
@@ -40,6 +41,7 @@ func (r Runtime) manager(ctx context.Context, args []string) error {
 	flags.StringVar(&options.Sender, "sender", "tc://endpoint/tcctl", "sender endpoint ref for --send")
 	flags.StringVar(&options.MessageRef, "message-ref", "", "optional message ref for --send")
 	flags.StringVar(&options.TargetEndpointRef, "target-endpoint", "", "route --send only to this endpoint ref")
+	flags.StringVar(&options.PreferredEndpointRef, "prefer-endpoint", "", "prefer this endpoint ref for --send, with fallback")
 	flags.StringVar(&options.DependsOn, "depends-on", "", "comma-separated message refs that must complete before --send can be claimed")
 	qualityGate := flags.String("quality-gate", contracts.QualityGateWarn.String(), "quality gate mode for --send: enforce, warn, or skip")
 	flags.BoolVar(&options.ReadbackRequired, "readback-required", true, "require worker readback for --send")
@@ -110,6 +112,7 @@ func (r Runtime) managerSend(ctx context.Context, options *managerOptions) (cont
 		SenderEndpointRef:    options.Sender,
 		TargetCapability:     options.Capability,
 		TargetEndpointRef:    options.TargetEndpointRef,
+		PreferredEndpointRef: options.PreferredEndpointRef,
 		DependsOnMessageRefs: splitCSV(options.DependsOn),
 		CorrelationRef:       options.TaskRef,
 		ReadbackRequired:     options.ReadbackRequired,

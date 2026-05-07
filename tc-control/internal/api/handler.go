@@ -42,6 +42,8 @@ func (h *Handler) serveGet(w http.ResponseWriter, r *http.Request, path string) 
 		h.version(w, r)
 	case path == "v1/snapshot":
 		h.snapshot(w, r)
+	case path == "v1/events":
+		h.events(w, r)
 	case path == "v1/endpoints":
 		h.endpoints(w, r)
 	case path == "v1/endpoints/inspect":

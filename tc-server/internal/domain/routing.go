@@ -19,6 +19,23 @@ func MessageRoutableToEndpoint(message Message, endpoint Endpoint) bool {
 		EndpointCanHandle(endpoint, message.TargetCapability)
 }
 
+func MessageClaimableByEndpoint(message Message, endpoint Endpoint, preferredEndpointOnline bool) bool {
+	if !MessageRoutableToEndpoint(message, endpoint) {
+		return false
+	}
+	preferredEndpointRef := strings.TrimSpace(message.PreferredEndpointRef)
+	return preferredEndpointRef == "" || preferredEndpointRef == endpoint.EndpointRef || !preferredEndpointOnline
+}
+
+func PreferredEndpointOnlineForMessage(message Message, endpoints map[string]Endpoint) bool {
+	preferredEndpointRef := strings.TrimSpace(message.PreferredEndpointRef)
+	if preferredEndpointRef == "" {
+		return false
+	}
+	endpoint, ok := endpoints[preferredEndpointRef]
+	return ok && EndpointCanHandle(endpoint, message.TargetCapability)
+}
+
 func MessageDependenciesCompleted(message Message, states map[string]string) bool {
 	for _, ref := range message.DependsOnMessageRefs {
 		ref = strings.TrimSpace(ref)

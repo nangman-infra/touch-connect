@@ -59,6 +59,7 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 	taskRef := flags.String("task", "", "task/correlation ref")
 	messageRef := flags.String("message-ref", "", "optional message ref")
 	targetEndpoint := flags.String("target-endpoint", "", "route only to this endpoint ref")
+	preferredEndpoint := flags.String("prefer-endpoint", "", "prefer this endpoint ref, but allow fallback if it is offline or incompatible")
 	dependsOn := flags.String("depends-on", "", "comma-separated message refs that must complete before this message can be claimed")
 	readbackRequired := flags.Bool("readback-required", false, "require worker readback")
 	qualityGate := flags.String("quality-gate", contracts.QualityGateEnforce.String(), "quality gate mode: enforce, warn, or skip")
@@ -84,6 +85,7 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 		SenderEndpointRef:    *sender,
 		TargetCapability:     *capability,
 		TargetEndpointRef:    *targetEndpoint,
+		PreferredEndpointRef: *preferredEndpoint,
 		DependsOnMessageRefs: splitCSV(*dependsOn),
 		CorrelationRef:       *taskRef,
 		ReadbackRequired:     *readbackRequired,
@@ -191,6 +193,7 @@ func (r Runtime) createTask(ctx context.Context, args []string) error {
 		flags.String("body", "", "payload body")
 		flags.String("body-file", "", "read payload body from file")
 		flags.String("target-endpoint", "", "route only to this endpoint ref")
+		flags.String("prefer-endpoint", "", "prefer this endpoint ref, but allow fallback if it is offline or incompatible")
 		flags.String("depends-on", "", "comma-separated message refs that must complete before this task message can be claimed")
 		flags.Bool("readback-required", true, "require worker readback")
 		flags.Usage()
@@ -206,6 +209,7 @@ func (r Runtime) createTask(ctx context.Context, args []string) error {
 	body := flags.String("body", "", "payload body")
 	bodyFile := flags.String("body-file", "", "read payload body from file")
 	targetEndpoint := flags.String("target-endpoint", "", "route only to this endpoint ref")
+	preferredEndpoint := flags.String("prefer-endpoint", "", "prefer this endpoint ref, but allow fallback if it is offline or incompatible")
 	dependsOn := flags.String("depends-on", "", "comma-separated message refs that must complete before this task message can be claimed")
 	readbackRequired := flags.Bool("readback-required", true, "require worker readback")
 	if err := parseCommandFlags(flags, args[1:]); err != nil {
@@ -224,6 +228,7 @@ func (r Runtime) createTask(ctx context.Context, args []string) error {
 		SenderEndpointRef:    *sender,
 		TargetCapability:     *capability,
 		TargetEndpointRef:    *targetEndpoint,
+		PreferredEndpointRef: *preferredEndpoint,
 		DependsOnMessageRefs: splitCSV(*dependsOn),
 		CorrelationRef:       args[0],
 		ReadbackRequired:     *readbackRequired,

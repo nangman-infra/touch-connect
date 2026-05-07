@@ -63,17 +63,20 @@ func WriteMessages(w io.Writer, items []contracts.MessageRecord) {
 		target := item.TargetCapability
 		if item.TargetEndpointRef != "" {
 			target += "@" + item.TargetEndpointRef
+		} else if item.PreferredEndpointRef != "" {
+			target += "~" + item.PreferredEndpointRef
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.MessageRef, item.State, target, item.Payload.Summary)
 	}
 }
 
 func WriteMessage(w io.Writer, item contracts.MessageRecord) {
-	fmt.Fprintf(w, "message=%s\nstate=%s\ncapability=%s\ntarget_endpoint=%s\ndepends_on=%s\nsummary=%s\ncorrelation=%s\n",
+	fmt.Fprintf(w, "message=%s\nstate=%s\ncapability=%s\ntarget_endpoint=%s\npreferred_endpoint=%s\ndepends_on=%s\nsummary=%s\ncorrelation=%s\n",
 		item.MessageRef,
 		item.State,
 		item.TargetCapability,
 		item.TargetEndpointRef,
+		item.PreferredEndpointRef,
 		strings.Join(item.DependsOnMessageRefs, ","),
 		item.Payload.Summary,
 		item.CorrelationRef,

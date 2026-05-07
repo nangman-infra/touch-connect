@@ -28,7 +28,7 @@ ORDER BY CASE state WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, message_ref`,
 	if err != nil {
 		return domain.ClaimResult{}, false, err
 	}
-	message, ok := nextEligibleMessage(messages, claim.Endpoint)
+	message, ok := nextEligibleMessage(messages, claim)
 	if !ok {
 		if err := tx.Commit(); err != nil {
 			return domain.ClaimResult{}, false, err
@@ -55,13 +55,14 @@ ORDER BY CASE state WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, message_ref`,
 	return result, true, nil
 }
 
-func nextEligibleMessage(messages []domain.Message, endpoint domain.Endpoint) (domain.Message, bool) {
+func nextEligibleMessage(messages []domain.Message, claim domain.ClaimNextRequest) (domain.Message, bool) {
 	states := messageStates(messages)
 	for _, message := range messages {
 		if !claimNextStateEligible(message.State) {
 			continue
 		}
-		if domain.MessageRoutableToEndpoint(message, endpoint) && domain.MessageDependenciesCompleted(message, states) {
+		if domain.MessageClaimableByEndpoint(message, claim.Endpoint, domain.PreferredEndpointOnlineForMessage(message, claim.PreferredEndpoints)) &&
+			domain.MessageDependenciesCompleted(message, states) {
 			return message, true
 		}
 	}

@@ -212,6 +212,7 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 		SenderEndpointRef:    req.SenderEndpointRef,
 		TargetCapability:     req.TargetCapability,
 		TargetEndpointRef:    req.TargetEndpointRef,
+		PreferredEndpointRef: req.PreferredEndpointRef,
 		DependsOnMessageRefs: append([]string(nil), req.DependsOnMessageRefs...),
 		Payload:              req.Payload,
 		Constraints:          req.Constraints,
@@ -257,7 +258,7 @@ func (s *Service) ClaimMessage(messageRef string, req contracts.ClaimMessageRequ
 	if !ok {
 		return contracts.ClaimMessageResponse{}, domain.ErrMessageNotFound
 	}
-	if !domain.MessageRoutableToEndpoint(message, endpoint) {
+	if !s.messageClaimableByEndpoint(message, endpoint) {
 		return contracts.ClaimMessageResponse{}, domain.ErrCapabilityNotFound
 	}
 	if !s.messageDependenciesCompleted(message) {
@@ -299,10 +300,11 @@ func (s *Service) ClaimNextMessage(req contracts.ClaimNextMessageRequest) (contr
 		return s.claimNextMessageWithDeliveryAdapter(endpoint, now)
 	}
 	result, found, err := s.processing.ClaimNextMessage(domain.ClaimNextRequest{
-		Endpoint:       endpoint,
-		LeaseExpiresAt: now.Add(s.settings.AttemptLeaseDuration),
-		Now:            now,
-		MaxRedelivery:  s.settings.MaxRedelivery,
+		Endpoint:           endpoint,
+		LeaseExpiresAt:     now.Add(s.settings.AttemptLeaseDuration),
+		Now:                now,
+		MaxRedelivery:      s.settings.MaxRedelivery,
+		PreferredEndpoints: s.onlineEndpointsByRef(),
 	})
 	if err != nil {
 		return contracts.ClaimNextMessageResponse{}, err
@@ -332,7 +334,7 @@ func (s *Service) claimNextMessageWithDeliveryAdapter(endpoint domain.Endpoint, 
 		}
 		return contracts.ClaimNextMessageResponse{}, domain.ErrMessageNotFound
 	}
-	if !domain.MessageRoutableToEndpoint(message, endpoint) || !s.messageDependenciesCompleted(message) {
+	if !s.messageClaimableByEndpoint(message, endpoint) || !s.messageDependenciesCompleted(message) {
 		if nakErr := s.delivery.NakDelivery(delivery.DeliveryRef, domain.ErrMessageUnavailable.Error()); nakErr != nil {
 			return contracts.ClaimNextMessageResponse{}, nakErr
 		}
@@ -374,6 +376,30 @@ func (s *Service) ingressRouteAvailable(req contracts.MessageIngressRequest) boo
 		}
 	}
 	return false
+}
+
+func (s *Service) messageClaimableByEndpoint(message domain.Message, endpoint domain.Endpoint) bool {
+	return domain.MessageClaimableByEndpoint(message, endpoint, s.preferredEndpointOnline(message))
+}
+
+func (s *Service) preferredEndpointOnline(message domain.Message) bool {
+	preferredEndpointRef := strings.TrimSpace(message.PreferredEndpointRef)
+	if preferredEndpointRef == "" {
+		return false
+	}
+	endpoint, ok := s.endpoints.GetEndpoint(preferredEndpointRef)
+	return ok && !s.endpointIsStale(endpoint) && domain.EndpointCanHandle(endpoint, message.TargetCapability)
+}
+
+func (s *Service) onlineEndpointsByRef() map[string]domain.Endpoint {
+	endpoints := s.Snapshot().Endpoints
+	active := make(map[string]domain.Endpoint, len(endpoints))
+	for _, endpoint := range endpoints {
+		if endpoint.ConnectionState == domain.EndpointStateOnline {
+			active[endpoint.EndpointRef] = endpoint
+		}
+	}
+	return active
 }
 
 func (s *Service) messageDependenciesCompleted(message domain.Message) bool {
@@ -556,6 +582,7 @@ func (s *Service) createFollowUpMessages(req contracts.CompleteAttemptRequest, p
 			SenderEndpointRef:    req.EndpointRef,
 			TargetCapability:     followUp.TargetCapability,
 			TargetEndpointRef:    followUp.TargetEndpointRef,
+			PreferredEndpointRef: followUp.PreferredEndpointRef,
 			DependsOnMessageRefs: dependsOn,
 			Payload: contracts.Payload{
 				Summary:    followUp.Summary,
@@ -679,6 +706,7 @@ func claimResponseFromResult(result domain.ClaimResult, endpointRef string) cont
 		ReadbackRequired:     result.Message.ReadbackRequired,
 		TargetCapability:     result.Message.TargetCapability,
 		TargetEndpointRef:    result.Message.TargetEndpointRef,
+		PreferredEndpointRef: result.Message.PreferredEndpointRef,
 		DependsOnMessageRefs: append([]string(nil), result.Message.DependsOnMessageRefs...),
 		CorrelationRef:       result.Message.CorrelationRef,
 		Payload:              result.Message.Payload,

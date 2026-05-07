@@ -73,6 +73,7 @@ type MessageIngressRequest struct {
 	SenderEndpointRef    string       `json:"sender_endpoint_ref"`
 	TargetCapability     string       `json:"target_capability"`
 	TargetEndpointRef    string       `json:"target_endpoint_ref,omitempty"`
+	PreferredEndpointRef string       `json:"preferred_endpoint_ref,omitempty"`
 	DependsOnMessageRefs []string     `json:"depends_on_message_refs,omitempty"`
 	Payload              Payload      `json:"payload"`
 	Constraints          []Constraint `json:"constraints"`
@@ -120,6 +121,7 @@ type ClaimMessageResponse struct {
 	ReadbackRequired     bool         `json:"readback_required"`
 	TargetCapability     string       `json:"target_capability"`
 	TargetEndpointRef    string       `json:"target_endpoint_ref,omitempty"`
+	PreferredEndpointRef string       `json:"preferred_endpoint_ref,omitempty"`
 	DependsOnMessageRefs []string     `json:"depends_on_message_refs,omitempty"`
 	CorrelationRef       string       `json:"correlation_ref,omitempty"`
 	Payload              Payload      `json:"payload"`
@@ -277,6 +279,7 @@ type FollowUpMessageRequest struct {
 	MessageRef           string          `json:"message_ref,omitempty"`
 	TargetCapability     string          `json:"target_capability"`
 	TargetEndpointRef    string          `json:"target_endpoint_ref,omitempty"`
+	PreferredEndpointRef string          `json:"preferred_endpoint_ref,omitempty"`
 	DependsOnMessageRefs []string        `json:"depends_on_message_refs,omitempty"`
 	Summary              string          `json:"summary"`
 	Body                 string          `json:"body"`

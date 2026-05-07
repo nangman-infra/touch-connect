@@ -17,11 +17,9 @@ func (s *Store) ClaimNextMessage(claim domain.ClaimNextRequest) (domain.ClaimRes
 	defer tx.Rollback()
 	rows, err := tx.Query(`
 SELECT body FROM messages
-WHERE state IN (?, ?)
-ORDER BY CASE state WHEN ? THEN 0 ELSE 1 END, message_ref`,
+ORDER BY CASE state WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, message_ref`,
 		domain.MessageStateTakeoverCandidate,
 		domain.MessageStateAvailable,
-		domain.MessageStateTakeoverCandidate,
 	)
 	if err != nil {
 		return domain.ClaimResult{}, false, err
@@ -58,12 +56,28 @@ ORDER BY CASE state WHEN ? THEN 0 ELSE 1 END, message_ref`,
 }
 
 func nextEligibleMessage(messages []domain.Message, endpoint domain.Endpoint) (domain.Message, bool) {
+	states := messageStates(messages)
 	for _, message := range messages {
-		if _, ok := endpoint.Capabilities[message.TargetCapability]; ok {
+		if !claimNextStateEligible(message.State) {
+			continue
+		}
+		if domain.MessageRoutableToEndpoint(message, endpoint) && domain.MessageDependenciesCompleted(message, states) {
 			return message, true
 		}
 	}
 	return domain.Message{}, false
+}
+
+func claimNextStateEligible(state string) bool {
+	return state == domain.MessageStateTakeoverCandidate || state == domain.MessageStateAvailable
+}
+
+func messageStates(messages []domain.Message) map[string]string {
+	states := make(map[string]string, len(messages))
+	for _, message := range messages {
+		states[message.MessageRef] = message.State
+	}
+	return states
 }
 
 func claimRequestFromNextTx(tx *sql.Tx, message domain.Message, claim domain.ClaimNextRequest) (domain.ClaimRequest, error) {

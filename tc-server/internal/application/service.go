@@ -117,6 +117,11 @@ func (s *Service) RegisterEndpoint(req contracts.EndpointRegistrationRequest) (c
 	if err := domain.ValidateEndpointRegistration(req); err != nil {
 		return contracts.EndpointRegistrationResponse{}, err
 	}
+	if existing, ok := s.endpoints.GetEndpoint(req.EndpointRef); ok &&
+		existing.ConnectionState == domain.EndpointStateOnline &&
+		!s.endpointIsStale(existing) {
+		return contracts.EndpointRegistrationResponse{}, domain.ErrEndpointAlreadyOnline
+	}
 	endpoint := domain.Endpoint{
 		EndpointRef:     req.EndpointRef,
 		DisplayName:     req.DisplayName,
@@ -156,6 +161,15 @@ func (s *Service) HeartbeatEndpoint(endpointRef string, req contracts.EndpointHe
 	now := s.now()
 	endpoint.ConnectionState = req.ConnectionState
 	endpoint.LastHeartbeatAt = now
+	endpoint.CurrentAttemptRef = strings.TrimSpace(req.CurrentAttemptRef)
+	endpoint.ProgressSummary = strings.TrimSpace(req.ProgressSummary)
+	if req.LastActivityAt != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, req.LastActivityAt); err == nil {
+			endpoint.LastActivityAt = parsed.UTC()
+		}
+	} else if endpoint.CurrentAttemptRef != "" {
+		endpoint.LastActivityAt = now
+	}
 	if err := s.endpoints.UpdateEndpoint(endpoint); err != nil {
 		return contracts.EndpointHeartbeatResponse{}, err
 	}
@@ -185,7 +199,7 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 	if err := domain.ValidateMessage(req); err != nil {
 		return contracts.MessageIngressResponse{}, err
 	}
-	if len(s.endpoints.CapabilityEndpoints(req.TargetCapability)) == 0 {
+	if !s.ingressRouteAvailable(req) {
 		return contracts.MessageIngressResponse{}, domain.ErrCapabilityNotFound
 	}
 	messageRef := req.MessageRef
@@ -193,15 +207,17 @@ func (s *Service) IngressMessage(req contracts.MessageIngressRequest) (contracts
 		messageRef = s.refs.NextRef("message")
 	}
 	message := domain.Message{
-		MessageRef:        messageRef,
-		DeliveryRef:       s.refs.NextRef("delivery"),
-		SenderEndpointRef: req.SenderEndpointRef,
-		TargetCapability:  req.TargetCapability,
-		Payload:           req.Payload,
-		Constraints:       req.Constraints,
-		CorrelationRef:    req.CorrelationRef,
-		ReadbackRequired:  req.ReadbackRequired,
-		State:             domain.MessageStateAvailable,
+		MessageRef:           messageRef,
+		DeliveryRef:          s.refs.NextRef("delivery"),
+		SenderEndpointRef:    req.SenderEndpointRef,
+		TargetCapability:     req.TargetCapability,
+		TargetEndpointRef:    req.TargetEndpointRef,
+		DependsOnMessageRefs: append([]string(nil), req.DependsOnMessageRefs...),
+		Payload:              req.Payload,
+		Constraints:          req.Constraints,
+		CorrelationRef:       req.CorrelationRef,
+		ReadbackRequired:     req.ReadbackRequired,
+		State:                domain.MessageStateAvailable,
 	}
 	qualityDecision := quality.ValidateMessageWithGate(quality.ValidationInput{
 		DecisionRef: s.refs.NextRef("quality-decision"),
@@ -241,8 +257,11 @@ func (s *Service) ClaimMessage(messageRef string, req contracts.ClaimMessageRequ
 	if !ok {
 		return contracts.ClaimMessageResponse{}, domain.ErrMessageNotFound
 	}
-	if _, ok := endpoint.Capabilities[message.TargetCapability]; !ok {
+	if !domain.MessageRoutableToEndpoint(message, endpoint) {
 		return contracts.ClaimMessageResponse{}, domain.ErrCapabilityNotFound
+	}
+	if !s.messageDependenciesCompleted(message) {
+		return contracts.ClaimMessageResponse{}, domain.ErrMessageUnavailable
 	}
 	if s.endpointIsStale(endpoint) {
 		return contracts.ClaimMessageResponse{}, domain.ErrEndpointStale
@@ -306,6 +325,19 @@ func (s *Service) claimNextMessageWithDeliveryAdapter(endpoint domain.Endpoint, 
 	if !found {
 		return contracts.ClaimNextMessageResponse{Empty: true}, nil
 	}
+	message, ok := s.messages.GetMessage(delivery.MessageRef)
+	if !ok {
+		if nakErr := s.delivery.NakDelivery(delivery.DeliveryRef, domain.ErrMessageNotFound.Error()); nakErr != nil {
+			return contracts.ClaimNextMessageResponse{}, nakErr
+		}
+		return contracts.ClaimNextMessageResponse{}, domain.ErrMessageNotFound
+	}
+	if !domain.MessageRoutableToEndpoint(message, endpoint) || !s.messageDependenciesCompleted(message) {
+		if nakErr := s.delivery.NakDelivery(delivery.DeliveryRef, domain.ErrMessageUnavailable.Error()); nakErr != nil {
+			return contracts.ClaimNextMessageResponse{}, nakErr
+		}
+		return contracts.ClaimNextMessageResponse{Empty: true}, nil
+	}
 	result, err := s.processing.ClaimMessage(domain.ClaimRequest{
 		MessageRef:     delivery.MessageRef,
 		Endpoint:       endpoint,
@@ -329,6 +361,32 @@ func (s *Service) claimNextMessageWithDeliveryAdapter(endpoint domain.Endpoint, 
 	}
 	claim := claimResponseFromResult(result, endpoint.EndpointRef)
 	return contracts.ClaimNextMessageResponse{Claim: &claim}, nil
+}
+
+func (s *Service) ingressRouteAvailable(req contracts.MessageIngressRequest) bool {
+	if req.TargetEndpointRef != "" {
+		endpoint, ok := s.endpoints.GetEndpoint(req.TargetEndpointRef)
+		return ok && domain.EndpointCanHandle(endpoint, req.TargetCapability)
+	}
+	for _, endpoint := range s.Snapshot().Endpoints {
+		if domain.EndpointCanHandle(endpoint, req.TargetCapability) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) messageDependenciesCompleted(message domain.Message) bool {
+	if len(message.DependsOnMessageRefs) == 0 {
+		return true
+	}
+	states := make(map[string]string, len(message.DependsOnMessageRefs))
+	for _, ref := range message.DependsOnMessageRefs {
+		if dependency, ok := s.messages.GetMessage(ref); ok {
+			states[ref] = dependency.State
+		}
+	}
+	return domain.MessageDependenciesCompleted(message, states)
 }
 
 func (s *Service) SubmitCheckpoint(attemptRef string, req contracts.CheckpointRequest) (contracts.CheckpointResponse, error) {
@@ -471,7 +529,50 @@ func (s *Service) CompleteAttempt(attemptRef string, req contracts.CompleteAttem
 	if err := s.messages.UpdateMessage(message); err != nil {
 		return contracts.CompleteAttemptResponse{}, err
 	}
-	return contracts.CompleteAttemptResponse{AttemptRef: attempt.AttemptRef, State: attempt.State}, nil
+	followUpRefs, err := s.createFollowUpMessages(req, message)
+	if err != nil {
+		return contracts.CompleteAttemptResponse{}, err
+	}
+	return contracts.CompleteAttemptResponse{
+		AttemptRef:          attempt.AttemptRef,
+		State:               attempt.State,
+		FollowUpMessageRefs: followUpRefs,
+	}, nil
+}
+
+func (s *Service) createFollowUpMessages(req contracts.CompleteAttemptRequest, parent domain.Message) ([]string, error) {
+	refs := make([]string, 0, len(req.FollowUpMessages))
+	for _, followUp := range req.FollowUpMessages {
+		dependsOn := append([]string(nil), followUp.DependsOnMessageRefs...)
+		if len(dependsOn) == 0 {
+			dependsOn = []string{parent.MessageRef}
+		}
+		constraints := append([]contracts.Constraint(nil), followUp.Constraints...)
+		if constraints == nil {
+			constraints = []contracts.Constraint{}
+		}
+		response, err := s.IngressMessage(contracts.MessageIngressRequest{
+			MessageRef:           followUp.MessageRef,
+			SenderEndpointRef:    req.EndpointRef,
+			TargetCapability:     followUp.TargetCapability,
+			TargetEndpointRef:    followUp.TargetEndpointRef,
+			DependsOnMessageRefs: dependsOn,
+			Payload: contracts.Payload{
+				Summary:    followUp.Summary,
+				Body:       followUp.Body,
+				References: []contracts.Reference{},
+			},
+			Constraints:      constraints,
+			CorrelationRef:   parent.CorrelationRef,
+			ReadbackRequired: followUp.ReadbackRequired,
+			QualityGate:      followUp.QualityGate,
+		})
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, response.MessageRef)
+	}
+	return refs, nil
 }
 
 func (s *Service) Snapshot() domain.Snapshot {
@@ -565,22 +666,24 @@ func constraintSummary(items []contracts.Constraint) string {
 
 func claimResponseFromResult(result domain.ClaimResult, endpointRef string) contracts.ClaimMessageResponse {
 	return contracts.ClaimMessageResponse{
-		MessageRef:         result.Message.MessageRef,
-		AttemptRef:         result.Attempt.AttemptRef,
-		EndpointRef:        endpointRef,
-		State:              result.Attempt.State,
-		LeaseExpiresAt:     formatTime(result.Attempt.LeaseExpiresAt),
-		Takeover:           result.Takeover,
-		RedeliveryCount:    result.Message.RedeliveryCount,
-		LastCheckpointRef:  result.LastCheckpointRef,
-		ResumeSummary:      result.ResumeSummary,
-		ResumeArtifactRefs: result.ResumeArtifactRefs,
-		ReadbackRequired:   result.Message.ReadbackRequired,
-		TargetCapability:   result.Message.TargetCapability,
-		CorrelationRef:     result.Message.CorrelationRef,
-		Payload:            result.Message.Payload,
-		Constraints:        result.Message.Constraints,
-		PayloadSummary:     result.Message.Payload.Summary,
-		ConstraintSummary:  constraintSummary(result.Message.Constraints),
+		MessageRef:           result.Message.MessageRef,
+		AttemptRef:           result.Attempt.AttemptRef,
+		EndpointRef:          endpointRef,
+		State:                result.Attempt.State,
+		LeaseExpiresAt:       formatTime(result.Attempt.LeaseExpiresAt),
+		Takeover:             result.Takeover,
+		RedeliveryCount:      result.Message.RedeliveryCount,
+		LastCheckpointRef:    result.LastCheckpointRef,
+		ResumeSummary:        result.ResumeSummary,
+		ResumeArtifactRefs:   result.ResumeArtifactRefs,
+		ReadbackRequired:     result.Message.ReadbackRequired,
+		TargetCapability:     result.Message.TargetCapability,
+		TargetEndpointRef:    result.Message.TargetEndpointRef,
+		DependsOnMessageRefs: append([]string(nil), result.Message.DependsOnMessageRefs...),
+		CorrelationRef:       result.Message.CorrelationRef,
+		Payload:              result.Message.Payload,
+		Constraints:          result.Message.Constraints,
+		PayloadSummary:       result.Message.Payload.Summary,
+		ConstraintSummary:    constraintSummary(result.Message.Constraints),
 	}
 }

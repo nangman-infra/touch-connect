@@ -28,9 +28,13 @@ func (s *Store) nextEligibleMessage(state string, endpoint domain.Endpoint) (dom
 		}
 	}
 	sort.Strings(refs)
+	states := make(map[string]string, len(s.messages))
+	for ref, message := range s.messages {
+		states[ref] = message.State
+	}
 	for _, messageRef := range refs {
 		message := s.messages[messageRef]
-		if _, ok := endpoint.Capabilities[message.TargetCapability]; ok {
+		if domain.MessageRoutableToEndpoint(message, endpoint) && domain.MessageDependenciesCompleted(message, states) {
 			return message, true
 		}
 	}

@@ -24,10 +24,10 @@ func TestBuildJoinEnvironmentDefaultsAndBackendPresets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build join env: %v", err)
 	}
-	if env.Backend != BackendCodex || env.Env["TC_WORKER_ENDPOINT_REF"] != "tc://endpoint/codex_worker" {
+	if env.Backend != BackendCodex || !strings.HasPrefix(env.Env["TC_WORKER_ENDPOINT_REF"], "tc://endpoint/codex_") {
 		t.Fatalf("unexpected join env: %+v", env)
 	}
-	if !containsJoinArg(env.Args, "approval_policy=\"never\"") || env.Env["TC_WORKER_MAX_MESSAGES"] != "3" {
+	if !containsJoinArg(env.Args, "approval_policy=\"never\"") || env.Env["TC_WORKER_MAX_MESSAGES"] != "3" || env.Env["TC_WORKER_PROGRESS_INTERVAL"] != "30s" {
 		t.Fatalf("expected codex preset args and max messages, env=%+v args=%+v", env.Env, env.Args)
 	}
 }
@@ -56,7 +56,7 @@ func TestJoinPathAndIdentityDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity defaults: %v", err)
 	}
-	if options.DisplayName != "Claude worker" || options.ActorID != "actor.claude-worker" || options.Timeout != 10*time.Minute {
+	if options.DisplayName != "Claude worker" || options.ActorID != "actor.claude-worker" || options.Timeout != 10*time.Minute || !strings.HasPrefix(options.EndpointRef, "tc://endpoint/claude_") {
 		t.Fatalf("unexpected identity defaults: %+v", options)
 	}
 }
@@ -82,6 +82,12 @@ func TestJoinPresetsAndValidationErrors(t *testing.T) {
 	}
 	if _, err := (JoinOptions{Backend: BackendClaude, SkillsDir: t.TempDir(), WorkDir: t.TempDir(), Timeout: -time.Second}).defaultIdentityAndTiming(); err == nil {
 		t.Fatalf("expected negative timeout to fail")
+	}
+	if _, err := (JoinOptions{Backend: BackendClaude, SkillsDir: t.TempDir(), WorkDir: t.TempDir(), ProgressInterval: -time.Second}).defaultIdentityAndTiming(); err == nil {
+		t.Fatalf("expected negative progress interval to fail")
+	}
+	if err := validateWorkerServerURL("file:///tmp/tc-server.sock"); err == nil {
+		t.Fatalf("expected non-http server URL to fail")
 	}
 	if joinHasNoSkills(JoinOptions{}) != true {
 		t.Fatalf("empty join options should have no skills")

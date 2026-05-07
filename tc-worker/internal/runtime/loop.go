@@ -93,7 +93,7 @@ func (r *Runtime) ProcessNext(ctx context.Context) (ProcessResult, error) {
 		TaskRef:        taskRefForClaim(claim),
 		CorrelationRef: claim.CorrelationRef,
 		Outcome:        outcome,
-		Completed:      outcome == ExecutionOutcomeCompleted,
+		Completed:      outcome == ExecutionOutcomeCompleted || outcome == ExecutionOutcomePartialCompleted,
 		Blocked:        outcome == ExecutionOutcomeMissingFields,
 		Failed:         outcome == ExecutionOutcomeFailed,
 	}, nil

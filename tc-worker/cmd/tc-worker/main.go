@@ -186,6 +186,7 @@ func parseJoinArgs(args []string) (joinRunOptions, error) {
 	flags.DurationVar(&options.Timeout, "timeout", durationFromEnv("TC_WORKER_AI_CLI_TIMEOUT"), "AI CLI execution timeout")
 	flags.DurationVar(&options.PollInterval, "poll-interval", durationFromEnv("TC_WORKER_POLL_INTERVAL"), "message poll interval")
 	flags.DurationVar(&options.HeartbeatInterval, "heartbeat-interval", durationFromEnv("TC_WORKER_HEARTBEAT_INTERVAL"), "endpoint heartbeat interval")
+	flags.DurationVar(&options.ProgressInterval, "progress-interval", durationFromEnv("TC_WORKER_PROGRESS_INTERVAL"), "in-progress checkpoint interval")
 	flags.IntVar(&options.MaxMessages, "max-messages", intFromEnv("TC_WORKER_MAX_MESSAGES"), "stop after processing this many messages; 0 means run until interrupted")
 	flags.StringVar(&options.Sandbox, "sandbox", getenvDefault("TC_WORKER_SANDBOX", "danger-full-access"), "backend sandbox/profile hint where supported")
 	flags.BoolVar(&parsed.Wizard, "wizard", false, "choose an installed AI CLI backend and model interactively without saving config")
@@ -352,6 +353,9 @@ func applyDurationOverrides(base *tcworker.JoinOptions, flags tcworker.JoinOptio
 	}
 	if visited["heartbeat-interval"] {
 		base.HeartbeatInterval = flags.HeartbeatInterval
+	}
+	if visited["progress-interval"] {
+		base.ProgressInterval = flags.ProgressInterval
 	}
 	if visited["max-messages"] {
 		base.MaxMessages = flags.MaxMessages

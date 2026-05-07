@@ -84,7 +84,7 @@ func (s *Store) CapabilityEndpoints(capability string) []domain.Endpoint {
 	defer s.mu.Unlock()
 	endpoints := make([]domain.Endpoint, 0)
 	for _, endpoint := range s.endpoints {
-		if _, ok := endpoint.Capabilities[capability]; ok {
+		if domain.EndpointCanHandle(endpoint, capability) {
 			endpoints = append(endpoints, endpoint)
 		}
 	}

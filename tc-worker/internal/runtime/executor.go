@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	ExecutionOutcomeCompleted     = "completed"
-	ExecutionOutcomeMissingFields = "missing_fields"
-	ExecutionOutcomeFailed        = "failed"
-	ExecutionOutcomeDropped       = "dropped"
+	ExecutionOutcomeCompleted        = "completed"
+	ExecutionOutcomePartialCompleted = "partial_completed"
+	ExecutionOutcomeMissingFields    = "missing_fields"
+	ExecutionOutcomeFailed           = "failed"
+	ExecutionOutcomeDropped          = "dropped"
 )
 
 type WorkerExecutor interface {
@@ -32,6 +33,13 @@ type ExecutionInput struct {
 	LastCheckpointRef  string
 	ResumeSummary      string
 	ResumeArtifactRefs []string
+	Progress           func(ExecutionProgress)
+}
+
+type ExecutionProgress struct {
+	Kind    string
+	Summary string
+	Line    string
 }
 
 type HandoffContext struct {
@@ -80,6 +88,7 @@ type ExecutionResult struct {
 	Stderr            string
 	ExitCode          int
 	DurationMS        int64
+	FollowUpMessages  []contracts.FollowUpMessageRequest
 }
 
 type EchoExecutor struct{}
@@ -129,6 +138,8 @@ func (r ExecutionResult) validated() (ExecutionResult, error) {
 	case "":
 		r.Outcome = ExecutionOutcomeCompleted
 	case ExecutionOutcomeCompleted:
+		return r, nil
+	case ExecutionOutcomePartialCompleted:
 		return r, nil
 	case ExecutionOutcomeMissingFields:
 		if len(r.MissingFields) == 0 {

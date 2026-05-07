@@ -172,6 +172,18 @@ func failedCommandOutput(reason string, summary string, output commandOutput, ex
 	}
 }
 
+func partialCommandOutput(reason string, summary string, output commandOutput, exitCode int, durationMS int64) ExecutionResult {
+	return ExecutionResult{
+		Outcome:           ExecutionOutcomePartialCompleted,
+		Summary:           summary,
+		FailureReasonCode: reason,
+		Stdout:            output.Stdout,
+		Stderr:            output.Stderr,
+		ExitCode:          exitCode,
+		DurationMS:        durationMS,
+	}
+}
+
 func missingFieldResult(name string, reason string) ExecutionResult {
 	return ExecutionResult{
 		Outcome: ExecutionOutcomeMissingFields,

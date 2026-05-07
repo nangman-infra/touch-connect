@@ -86,6 +86,28 @@ func TestLoopHelpersHandleInterruptsAndValidation(t *testing.T) {
 	}
 }
 
+func TestHeartbeatIncludesCurrentAttemptProgress(t *testing.T) {
+	client := &successfulLoopClient{}
+	worker := NewWithExecutor(client, Config{
+		EndpointRef:   "tc://endpoint/worker_progress",
+		DisplayName:   "progress worker",
+		ActorID:       "actor.progress",
+		WorkspaceID:   "workspace.progress",
+		WorkerVersion: "0.1.0-dev",
+		Capabilities:  []contracts.Capability{{Name: "code.change"}},
+	}, EchoExecutor{})
+	worker.markProgress("tc://attempt/att_progress", "still working")
+
+	if err := worker.Heartbeat(context.Background()); err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+	if client.lastHeartbeat.CurrentAttemptRef != "tc://attempt/att_progress" ||
+		client.lastHeartbeat.ProgressSummary != "still working" ||
+		client.lastHeartbeat.LastActivityAt == "" {
+		t.Fatalf("expected heartbeat progress fields, got %+v", client.lastHeartbeat)
+	}
+}
+
 func TestFinishClaimBranchesForExecutorFailuresAndTerminalOutcomes(t *testing.T) {
 	claim := contracts.ClaimMessageResponse{
 		MessageRef:       "tc://message/msg_finish",
@@ -173,9 +195,10 @@ type recoverableDropClient struct {
 }
 
 type successfulLoopClient struct {
-	claim     contracts.ClaimMessageResponse
-	claims    int
-	completed int
+	claim         contracts.ClaimMessageResponse
+	claims        int
+	completed     int
+	lastHeartbeat contracts.EndpointHeartbeatRequest
 }
 
 type staticExecutor struct {
@@ -203,7 +226,8 @@ func (c *successfulLoopClient) RegisterEndpoint(context.Context, contracts.Endpo
 	return contracts.EndpointRegistrationResponse{}, nil
 }
 
-func (c *successfulLoopClient) HeartbeatEndpoint(context.Context, string, contracts.EndpointHeartbeatRequest) (contracts.EndpointHeartbeatResponse, error) {
+func (c *successfulLoopClient) HeartbeatEndpoint(_ context.Context, _ string, req contracts.EndpointHeartbeatRequest) (contracts.EndpointHeartbeatResponse, error) {
+	c.lastHeartbeat = req
 	return contracts.EndpointHeartbeatResponse{}, nil
 }
 

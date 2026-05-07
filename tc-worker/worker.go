@@ -29,6 +29,7 @@ type HandoffArtifact = runtime.HandoffArtifact
 type HandoffContext = runtime.HandoffContext
 type HandoffMessage = runtime.HandoffMessage
 type ExecutionInput = runtime.ExecutionInput
+type ExecutionProgress = runtime.ExecutionProgress
 type ExecutionResult = runtime.ExecutionResult
 type LLMExecutor = runtime.LLMExecutor
 type LLMExecutorOptions = runtime.LLMExecutorOptions
@@ -44,11 +45,12 @@ type SkillExecutorOptions = runtime.SkillExecutorOptions
 type WorkerExecutor = runtime.WorkerExecutor
 
 const (
-	ExecutionOutcomeCompleted     = runtime.ExecutionOutcomeCompleted
-	ExecutionOutcomeMissingFields = runtime.ExecutionOutcomeMissingFields
-	ExecutionOutcomeFailed        = runtime.ExecutionOutcomeFailed
-	ExecutionOutcomeDropped       = runtime.ExecutionOutcomeDropped
-	executorAICLI                 = "ai-cli"
+	ExecutionOutcomeCompleted        = runtime.ExecutionOutcomeCompleted
+	ExecutionOutcomePartialCompleted = runtime.ExecutionOutcomePartialCompleted
+	ExecutionOutcomeMissingFields    = runtime.ExecutionOutcomeMissingFields
+	ExecutionOutcomeFailed           = runtime.ExecutionOutcomeFailed
+	ExecutionOutcomeDropped          = runtime.ExecutionOutcomeDropped
+	executorAICLI                    = "ai-cli"
 )
 
 func NewHTTPRuntime(serverURL string, httpClient *http.Client, config Config) *runtime.Runtime {
@@ -120,6 +122,11 @@ func configIdentityFromEnv(config Config) Config {
 	}
 	if value := os.Getenv("TC_WORKER_VERSION"); value != "" {
 		config.WorkerVersion = value
+	}
+	if value := os.Getenv("TC_WORKER_PROGRESS_INTERVAL"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil {
+			config.ProgressInterval = parsed
+		}
 	}
 	return config
 }

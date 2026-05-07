@@ -90,3 +90,48 @@ func TestAICLIExecutorValidationAndFailureResults(t *testing.T) {
 		t.Fatalf("unexpected failure result: %+v", result)
 	}
 }
+
+func TestAICLIExecutorStreamsProgressAndReadbackMarker(t *testing.T) {
+	executor, err := NewAICLIExecutor(AICLIExecutorOptions{
+		Command: "/bin/sh",
+		Args:    []string{"-c", "printf 'WORKER_READBACK ready\\nWORKER_RESULT_READY done\\n'"},
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new executor: %v", err)
+	}
+	var progress []ExecutionProgress
+	result, err := executor.Execute(context.Background(), ExecutionInput{
+		Payload: contracts.Payload{Summary: "stream"},
+		Progress: func(item ExecutionProgress) {
+			progress = append(progress, item)
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.Outcome != ExecutionOutcomeCompleted {
+		t.Fatalf("expected completed result, got %+v", result)
+	}
+	if len(progress) != 2 || progress[0].Kind != "readback" || !strings.Contains(progress[1].Summary, "WORKER_RESULT_READY") {
+		t.Fatalf("expected streamed progress with readback marker, got %+v", progress)
+	}
+}
+
+func TestAICLIExecutorReturnsPartialCompletedOnTimeout(t *testing.T) {
+	executor, err := NewAICLIExecutor(AICLIExecutorOptions{
+		Command: "/bin/sh",
+		Args:    []string{"-c", "printf 'partial line\\n'; sleep 2"},
+		Timeout: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("new executor: %v", err)
+	}
+	result, err := executor.Execute(context.Background(), ExecutionInput{Payload: contracts.Payload{Summary: "timeout"}})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.Outcome != ExecutionOutcomePartialCompleted || !strings.Contains(result.Stdout, "partial line") || result.FailureReasonCode != "ai_cli_timeout" {
+		t.Fatalf("expected partial completed timeout with stdout preserved, got %+v", result)
+	}
+}

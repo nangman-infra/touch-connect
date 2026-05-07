@@ -12,19 +12,21 @@ import (
 )
 
 type managerOptions struct {
-	TaskRef          string
-	Capability       string
-	Summary          string
-	Body             string
-	BodyFile         string
-	Sender           string
-	MessageRef       string
-	QualityGate      contracts.QualityGateMode
-	ReadbackRequired bool
-	Send             bool
-	Watch            bool
-	Once             bool
-	Interval         time.Duration
+	TaskRef           string
+	Capability        string
+	Summary           string
+	Body              string
+	BodyFile          string
+	Sender            string
+	MessageRef        string
+	TargetEndpointRef string
+	DependsOn         string
+	QualityGate       contracts.QualityGateMode
+	ReadbackRequired  bool
+	Send              bool
+	Watch             bool
+	Once              bool
+	Interval          time.Duration
 }
 
 func (r Runtime) manager(ctx context.Context, args []string) error {
@@ -37,6 +39,8 @@ func (r Runtime) manager(ctx context.Context, args []string) error {
 	flags.StringVar(&options.BodyFile, "body-file", "", "read payload body for --send from file")
 	flags.StringVar(&options.Sender, "sender", "tc://endpoint/tcctl", "sender endpoint ref for --send")
 	flags.StringVar(&options.MessageRef, "message-ref", "", "optional message ref for --send")
+	flags.StringVar(&options.TargetEndpointRef, "target-endpoint", "", "route --send only to this endpoint ref")
+	flags.StringVar(&options.DependsOn, "depends-on", "", "comma-separated message refs that must complete before --send can be claimed")
 	qualityGate := flags.String("quality-gate", contracts.QualityGateWarn.String(), "quality gate mode for --send: enforce, warn, or skip")
 	flags.BoolVar(&options.ReadbackRequired, "readback-required", true, "require worker readback for --send")
 	flags.BoolVar(&options.Send, "send", false, "send a manager handoff before rendering the cockpit")
@@ -102,13 +106,15 @@ func (r Runtime) managerSend(ctx context.Context, options *managerOptions) (cont
 		return contracts.MessageIngressResponse{}, usageError(fmt.Errorf("--send requires --capability, --summary, and one of --body or --body-file"))
 	}
 	req := contracts.MessageIngressRequest{
-		MessageRef:        options.MessageRef,
-		SenderEndpointRef: options.Sender,
-		TargetCapability:  options.Capability,
-		CorrelationRef:    options.TaskRef,
-		ReadbackRequired:  options.ReadbackRequired,
-		QualityGate:       options.QualityGate,
-		Constraints:       []contracts.Constraint{},
+		MessageRef:           options.MessageRef,
+		SenderEndpointRef:    options.Sender,
+		TargetCapability:     options.Capability,
+		TargetEndpointRef:    options.TargetEndpointRef,
+		DependsOnMessageRefs: splitCSV(options.DependsOn),
+		CorrelationRef:       options.TaskRef,
+		ReadbackRequired:     options.ReadbackRequired,
+		QualityGate:          options.QualityGate,
+		Constraints:          []contracts.Constraint{},
 		Payload: contracts.Payload{
 			Summary:    options.Summary,
 			Body:       body,
@@ -167,11 +173,16 @@ func writeManagerWorkers(w io.Writer, endpoints []contracts.EndpointRecord, opti
 		if options.Capability != "" && !containsString(caps, options.Capability) {
 			continue
 		}
-		fmt.Fprintf(w, "  %-8s %-32s caps=%s hints=%s\n",
+		progress := endpoint.ProgressSummary
+		if endpoint.CurrentAttemptRef != "" {
+			progress = shortRef(endpoint.CurrentAttemptRef) + " " + progress
+		}
+		fmt.Fprintf(w, "  %-8s %-32s caps=%s hints=%s progress=%s\n",
 			endpoint.ConnectionState,
 			shortRef(endpoint.EndpointRef),
 			compact(strings.Join(caps, ","), 48),
 			compact(strings.Join(endpoint.ExecutionHints, ","), 32),
+			compact(progress, 40),
 		)
 	}
 }

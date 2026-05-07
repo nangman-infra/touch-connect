@@ -403,6 +403,7 @@ func isNotFoundError(err error) bool {
 
 func isConflictError(err error) bool {
 	return errors.Is(err, domain.ErrMessageUnavailable) ||
+		errors.Is(err, domain.ErrEndpointAlreadyOnline) ||
 		errors.Is(err, domain.ErrStaleAttempt) ||
 		errors.Is(err, domain.ErrEndpointStale) ||
 		errors.Is(err, domain.ErrLeaseExpired) ||

@@ -58,6 +58,8 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 	bodyFile := flags.String("body-file", "", "read payload body from file")
 	taskRef := flags.String("task", "", "task/correlation ref")
 	messageRef := flags.String("message-ref", "", "optional message ref")
+	targetEndpoint := flags.String("target-endpoint", "", "route only to this endpoint ref")
+	dependsOn := flags.String("depends-on", "", "comma-separated message refs that must complete before this message can be claimed")
 	readbackRequired := flags.Bool("readback-required", false, "require worker readback")
 	qualityGate := flags.String("quality-gate", contracts.QualityGateEnforce.String(), "quality gate mode: enforce, warn, or skip")
 	constraint := flags.String("constraint", "", "optional code:summary constraint")
@@ -78,13 +80,15 @@ func (r Runtime) sendMessage(ctx context.Context, args []string) error {
 		return usageError(fmt.Errorf("--capability, --summary, and one of --body or --body-file are required"))
 	}
 	req := contracts.MessageIngressRequest{
-		MessageRef:        *messageRef,
-		SenderEndpointRef: *sender,
-		TargetCapability:  *capability,
-		CorrelationRef:    *taskRef,
-		ReadbackRequired:  *readbackRequired,
-		QualityGate:       gate,
-		Constraints:       []contracts.Constraint{},
+		MessageRef:           *messageRef,
+		SenderEndpointRef:    *sender,
+		TargetCapability:     *capability,
+		TargetEndpointRef:    *targetEndpoint,
+		DependsOnMessageRefs: splitCSV(*dependsOn),
+		CorrelationRef:       *taskRef,
+		ReadbackRequired:     *readbackRequired,
+		QualityGate:          gate,
+		Constraints:          []contracts.Constraint{},
 		Payload: contracts.Payload{
 			Summary:    *summary,
 			Body:       resolvedBody,
@@ -186,6 +190,8 @@ func (r Runtime) createTask(ctx context.Context, args []string) error {
 		flags.String("summary", "", "payload summary")
 		flags.String("body", "", "payload body")
 		flags.String("body-file", "", "read payload body from file")
+		flags.String("target-endpoint", "", "route only to this endpoint ref")
+		flags.String("depends-on", "", "comma-separated message refs that must complete before this task message can be claimed")
 		flags.Bool("readback-required", true, "require worker readback")
 		flags.Usage()
 		return errHelpRequested
@@ -199,6 +205,8 @@ func (r Runtime) createTask(ctx context.Context, args []string) error {
 	summary := flags.String("summary", "", "payload summary")
 	body := flags.String("body", "", "payload body")
 	bodyFile := flags.String("body-file", "", "read payload body from file")
+	targetEndpoint := flags.String("target-endpoint", "", "route only to this endpoint ref")
+	dependsOn := flags.String("depends-on", "", "comma-separated message refs that must complete before this task message can be claimed")
 	readbackRequired := flags.Bool("readback-required", true, "require worker readback")
 	if err := parseCommandFlags(flags, args[1:]); err != nil {
 		return err
@@ -213,11 +221,13 @@ func (r Runtime) createTask(ctx context.Context, args []string) error {
 		return usageError(fmt.Errorf("--capability, --summary, and one of --body or --body-file are required"))
 	}
 	value, err := r.client.SendMessage(ctx, contracts.MessageIngressRequest{
-		SenderEndpointRef: *sender,
-		TargetCapability:  *capability,
-		CorrelationRef:    args[0],
-		ReadbackRequired:  *readbackRequired,
-		Constraints:       []contracts.Constraint{},
+		SenderEndpointRef:    *sender,
+		TargetCapability:     *capability,
+		TargetEndpointRef:    *targetEndpoint,
+		DependsOnMessageRefs: splitCSV(*dependsOn),
+		CorrelationRef:       args[0],
+		ReadbackRequired:     *readbackRequired,
+		Constraints:          []contracts.Constraint{},
 		Payload: contracts.Payload{
 			Summary:    *summary,
 			Body:       resolvedBody,

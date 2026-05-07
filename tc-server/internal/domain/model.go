@@ -41,31 +41,36 @@ const (
 )
 
 type Endpoint struct {
-	EndpointRef     string
-	DisplayName     string
-	ActorID         string
-	WorkspaceID     string
-	ConnectionState string
-	Capabilities    map[string]contracts.Capability
-	ExecutionHints  []string
-	WorkerVersion   string
-	StartedAt       string
-	RegisteredAt    time.Time
-	LastHeartbeatAt time.Time
+	EndpointRef       string
+	DisplayName       string
+	ActorID           string
+	WorkspaceID       string
+	ConnectionState   string
+	Capabilities      map[string]contracts.Capability
+	ExecutionHints    []string
+	WorkerVersion     string
+	StartedAt         string
+	RegisteredAt      time.Time
+	LastHeartbeatAt   time.Time
+	CurrentAttemptRef string
+	LastActivityAt    time.Time
+	ProgressSummary   string
 }
 
 type Message struct {
-	MessageRef        string
-	DeliveryRef       string
-	SenderEndpointRef string
-	TargetCapability  string
-	Payload           contracts.Payload
-	Constraints       []contracts.Constraint
-	CorrelationRef    string
-	ReadbackRequired  bool
-	State             string
-	AttemptRef        string
-	RedeliveryCount   int
+	MessageRef           string
+	DeliveryRef          string
+	SenderEndpointRef    string
+	TargetCapability     string
+	TargetEndpointRef    string
+	DependsOnMessageRefs []string
+	Payload              contracts.Payload
+	Constraints          []contracts.Constraint
+	CorrelationRef       string
+	ReadbackRequired     bool
+	State                string
+	AttemptRef           string
+	RedeliveryCount      int
 }
 
 type Attempt struct {

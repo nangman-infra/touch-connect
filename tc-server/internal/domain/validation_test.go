@@ -64,6 +64,11 @@ func TestValidateMessage(t *testing.T) {
 		t.Fatal("invalid quality gate should be rejected")
 	}
 	valid.QualityGate = ""
+	valid.DependsOnMessageRefs = []string{""}
+	if !errors.Is(ValidateMessage(valid), ErrInvalidInput) {
+		t.Fatal("blank depends_on message ref should be rejected")
+	}
+	valid.DependsOnMessageRefs = nil
 	valid.Payload.References = nil
 	if !errors.Is(ValidateMessage(valid), ErrInvalidInput) {
 		t.Fatal("nil references should be rejected")

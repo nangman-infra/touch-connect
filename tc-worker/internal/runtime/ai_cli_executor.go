@@ -1,17 +1,22 @@
 package runtime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
 const (
-	defaultAICLITimeout = 10 * time.Minute
+	defaultAICLITimeout     = 10 * time.Minute
+	defaultAICLIGracePeriod = 30 * time.Second
 )
 
 type AICLIExecutorOptions struct {
@@ -47,7 +52,7 @@ func (e *AICLIExecutor) Execute(ctx context.Context, input ExecutionInput) (Exec
 	defer cancel()
 	prompt := llmPromptFromInput(input)
 	args, promptInArgs := aiCLIArgsWithPrompt(e.args, prompt)
-	command := exec.CommandContext(runCtx, e.command, args...)
+	command := exec.Command(e.command, args...)
 	if e.workDir != "" {
 		command.Dir = e.workDir
 	}
@@ -56,13 +61,34 @@ func (e *AICLIExecutor) Execute(ctx context.Context, input ExecutionInput) (Exec
 	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
+	stdoutPipe, err := command.StdoutPipe()
+	if err != nil {
+		return failedCommandOutput("ai_cli_start_failed", err.Error(), commandOutput{}, -1, 0), nil
+	}
+	stderrPipe, err := command.StderrPipe()
+	if err != nil {
+		return failedCommandOutput("ai_cli_start_failed", err.Error(), commandOutput{}, -1, 0), nil
+	}
+	if err := command.Start(); err != nil {
+		return failedCommandOutput("ai_cli_start_failed", err.Error(), commandOutput{}, -1, 0), nil
+	}
+	var scanWG sync.WaitGroup
+	scanWG.Add(2)
+	go scanAICLIOutput(stdoutPipe, &stdout, input.Progress, true, &scanWG)
+	go scanAICLIOutput(stderrPipe, &stderr, input.Progress, false, &scanWG)
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- command.Wait()
+	}()
+	err, interrupted := waitForAICLICommand(runCtx, command, waitDone)
+	scanWG.Wait()
 	durationMS := time.Since(startedAt).Milliseconds()
 	output := collectCommandOutput(stdout.String(), stderr.String())
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		return failedCommandOutput("ai_cli_timeout", "AI CLI timed out", output, -1, durationMS), nil
+	if interrupted && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		return partialCommandOutput("ai_cli_timeout", "AI CLI timed out; partial output preserved", output, -1, durationMS), nil
+	}
+	if interrupted {
+		return failedCommandOutput("ai_cli_canceled", "AI CLI canceled", output, -1, durationMS), nil
 	}
 	if err != nil {
 		exitCode := exitCodeFromError(err)
@@ -83,6 +109,56 @@ func (e *AICLIExecutor) Execute(ctx context.Context, input ExecutionInput) (Exec
 		ExitCode:   0,
 		DurationMS: durationMS,
 	}, nil
+}
+
+func scanAICLIOutput(reader io.Reader, buffer *bytes.Buffer, progress func(ExecutionProgress), stdout bool, wg *sync.WaitGroup) {
+	defer wg.Done()
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		buffer.WriteString(line)
+		buffer.WriteByte('\n')
+		if !stdout || progress == nil {
+			continue
+		}
+		kind := "stdout"
+		if strings.Contains(line, "WORKER_READBACK") {
+			kind = "readback"
+		}
+		progress(ExecutionProgress{
+			Kind:    kind,
+			Summary: line,
+			Line:    line,
+		})
+	}
+}
+
+func waitForAICLICommand(ctx context.Context, command *exec.Cmd, waitDone <-chan error) (error, bool) {
+	select {
+	case err := <-waitDone:
+		return err, false
+	case <-ctx.Done():
+		terminateAICLIProcess(command)
+		select {
+		case err := <-waitDone:
+			return err, true
+		case <-time.After(defaultAICLIGracePeriod):
+			if command.Process != nil {
+				_ = command.Process.Kill()
+			}
+			return <-waitDone, true
+		}
+	}
+}
+
+func terminateAICLIProcess(command *exec.Cmd) {
+	if command.Process == nil {
+		return
+	}
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		_ = command.Process.Kill()
+	}
 }
 
 func aiCLIArgsWithPrompt(args []string, prompt string) ([]string, bool) {

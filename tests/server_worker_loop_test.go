@@ -65,7 +65,8 @@ func TestWorkerRunMarksEndpointOfflineAfterMaxMessages(t *testing.T) {
 		t.Fatalf("seed register worker: %v", err)
 	}
 	ingressMessage(t, httpServer.URL, httpServer.Client(), false)
-	worker := tcworker.NewHTTPRuntime(httpServer.URL, httpServer.Client(), tcworker.DefaultConfig())
+	runConfig := workerConfig("tc://endpoint/ep_loop_runner", "actor.loop.runner")
+	worker := tcworker.NewHTTPRuntime(httpServer.URL, httpServer.Client(), runConfig)
 
 	err := worker.Run(context.Background(), tcworker.LoopOptions{
 		PollInterval:      time.Millisecond,
@@ -76,8 +77,17 @@ func TestWorkerRunMarksEndpointOfflineAfterMaxMessages(t *testing.T) {
 		t.Fatalf("run worker loop: %v", err)
 	}
 	snapshot := server.Snapshot()
-	if snapshot.Endpoints[0].ConnectionState != "offline" {
-		t.Fatalf("expected offline endpoint after bounded loop, got %+v", snapshot.Endpoints[0])
+	var runnerFound bool
+	for _, endpoint := range snapshot.Endpoints {
+		if endpoint.EndpointRef == runConfig.EndpointRef {
+			runnerFound = true
+			if endpoint.ConnectionState != "offline" {
+				t.Fatalf("expected offline endpoint after bounded loop, got %+v", endpoint)
+			}
+		}
+	}
+	if !runnerFound {
+		t.Fatalf("expected runner endpoint in snapshot, got %+v", snapshot.Endpoints)
 	}
 	if snapshot.Messages[0].State != "completed" {
 		t.Fatalf("expected message completed by loop, got %+v", snapshot.Messages[0])
@@ -150,6 +160,131 @@ func TestWorkerRefreshesLeaseDuringLongExecution(t *testing.T) {
 	}
 	if snapshot := server.Snapshot(); snapshot.Messages[0].State != "completed" || snapshot.Attempts[0].State != "completed" {
 		t.Fatalf("expected completed message and attempt after long execution, got %+v", snapshot)
+	}
+}
+
+func TestWorkerReportsProgressDuringLongExecution(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	executor := executorFunc(func(ctx context.Context, _ tcworker.ExecutionInput) (tcworker.ExecutionResult, error) {
+		select {
+		case <-ctx.Done():
+			return tcworker.ExecutionResult{}, ctx.Err()
+		case <-time.After(35 * time.Millisecond):
+			return tcworker.ExecutionResult{
+				Outcome: tcworker.ExecutionOutcomeCompleted,
+				Summary: "long execution completed with progress",
+			}, nil
+		}
+	})
+	config := tcworker.DefaultConfig()
+	config.ProgressInterval = 5 * time.Millisecond
+	worker := tcworker.NewHTTPRuntimeWithExecutor(httpServer.URL, httpServer.Client(), config, executor)
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	ingressMessage(t, httpServer.URL, httpServer.Client(), false)
+
+	result, err := worker.ProcessNext(context.Background())
+	if err != nil {
+		t.Fatalf("process long execution with progress: %v", err)
+	}
+	if !result.Completed {
+		t.Fatalf("expected completed result, got %+v", result)
+	}
+	foundProgress := false
+	for _, checkpoint := range server.Snapshot().Checkpoints {
+		if checkpoint.State == "in_progress" && checkpoint.Summary == "still working on "+result.MessageRef {
+			foundProgress = true
+		}
+	}
+	if !foundProgress {
+		t.Fatalf("expected at least one still-working checkpoint, got %+v", server.Snapshot().Checkpoints)
+	}
+}
+
+func TestWorkerSubmitsReadbackWhenExecutorStreamsMarker(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	executor := executorFunc(func(_ context.Context, input tcworker.ExecutionInput) (tcworker.ExecutionResult, error) {
+		input.Progress(tcworker.ExecutionProgress{
+			Kind:    "readback",
+			Summary: "WORKER_READBACK I understand the task",
+			Line:    "WORKER_READBACK I understand the task",
+		})
+		return tcworker.ExecutionResult{
+			Outcome: tcworker.ExecutionOutcomeCompleted,
+			Summary: "streaming marker completed",
+		}, nil
+	})
+	worker := tcworker.NewHTTPRuntimeWithExecutor(httpServer.URL, httpServer.Client(), tcworker.DefaultConfig(), executor)
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	ingressMessage(t, httpServer.URL, httpServer.Client(), true)
+
+	result, err := worker.ProcessNext(context.Background())
+	if err != nil {
+		t.Fatalf("process marker readback: %v", err)
+	}
+	if !result.Completed {
+		t.Fatalf("expected completed result, got %+v", result)
+	}
+	readbacks := server.Snapshot().Readbacks
+	if len(readbacks) != 1 || readbacks[0].Summary != "readback marker observed during execution" {
+		t.Fatalf("expected exactly one marker readback, got %+v", readbacks)
+	}
+}
+
+func TestWorkerCanCreateFollowUpMessageOnCompletion(t *testing.T) {
+	server := tcserver.NewInMemoryServer()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	executor := executorFunc(func(_ context.Context, _ tcworker.ExecutionInput) (tcworker.ExecutionResult, error) {
+		return tcworker.ExecutionResult{
+			Outcome: tcworker.ExecutionOutcomeCompleted,
+			Summary: "created follow-up",
+			FollowUpMessages: []contracts.FollowUpMessageRequest{
+				{
+					MessageRef:       "tc://message/msg_follow_up",
+					TargetCapability: "code.change",
+					Summary:          "follow-up review",
+					Body:             "Review the prior worker result.",
+				},
+			},
+		}, nil
+	})
+	worker := tcworker.NewHTTPRuntimeWithExecutor(httpServer.URL, httpServer.Client(), tcworker.DefaultConfig(), executor)
+	if err := worker.Register(context.Background()); err != nil {
+		t.Fatalf("register worker: %v", err)
+	}
+	parent := ingressMessage(t, httpServer.URL, httpServer.Client(), false)
+
+	result, err := worker.ProcessNext(context.Background())
+	if err != nil {
+		t.Fatalf("process follow-up result: %v", err)
+	}
+	if !result.Completed {
+		t.Fatalf("expected completed parent, got %+v", result)
+	}
+	snapshot := server.Snapshot()
+	if len(snapshot.Messages) != 2 {
+		t.Fatalf("expected parent plus follow-up messages, got %+v", snapshot.Messages)
+	}
+	var followUpFound bool
+	var followUpState string
+	var followUpDependsOn []string
+	for _, message := range server.Snapshot().Messages {
+		if message.MessageRef == "tc://message/msg_follow_up" {
+			followUpFound = true
+			followUpState = message.State
+			followUpDependsOn = append([]string(nil), message.DependsOnMessageRefs...)
+		}
+	}
+	if !followUpFound || followUpState != "available" || len(followUpDependsOn) != 1 || followUpDependsOn[0] != parent.MessageRef {
+		t.Fatalf("expected available follow-up depending on parent, found=%t state=%s depends_on=%v", followUpFound, followUpState, followUpDependsOn)
 	}
 }
 

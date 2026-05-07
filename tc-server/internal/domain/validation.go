@@ -8,26 +8,27 @@ import (
 )
 
 var (
-	ErrInvalidInput         = errors.New("invalid_input")
-	ErrEndpointNotFound     = errors.New("endpoint_not_found")
-	ErrCapabilityNotFound   = errors.New("capability_not_found")
-	ErrMessageNotFound      = errors.New("message_not_found")
-	ErrMessageUnavailable   = errors.New("message_unavailable")
-	ErrAttemptNotFound      = errors.New("attempt_not_found")
-	ErrStaleAttempt         = errors.New("stale_attempt")
-	ErrEndpointStale        = errors.New("endpoint_stale")
-	ErrLeaseExpired         = errors.New("lease_expired")
-	ErrMessageDeadLettered  = errors.New("message_dead_lettered")
-	ErrArtifactNotFound     = errors.New("artifact_not_found")
-	ErrArtifactExists       = errors.New("artifact_version_exists")
-	ErrApprovalNotFound     = errors.New("approval_not_found")
-	ErrApprovalRequired     = errors.New("approval_required")
-	ErrApprovalRejected     = errors.New("approval_not_approved")
-	ErrApprovalExpired      = errors.New("approval_expired")
-	ErrApprovalHashMismatch = errors.New("approval_hash_mismatch")
-	ErrSelfApproval         = errors.New("self_approval_forbidden")
-	ErrSideEffectNotFound   = errors.New("side_effect_not_found")
-	ErrSideEffectConflict   = errors.New("side_effect_conflict")
+	ErrInvalidInput          = errors.New("invalid_input")
+	ErrEndpointAlreadyOnline = errors.New("endpoint_already_online")
+	ErrEndpointNotFound      = errors.New("endpoint_not_found")
+	ErrCapabilityNotFound    = errors.New("capability_not_found")
+	ErrMessageNotFound       = errors.New("message_not_found")
+	ErrMessageUnavailable    = errors.New("message_unavailable")
+	ErrAttemptNotFound       = errors.New("attempt_not_found")
+	ErrStaleAttempt          = errors.New("stale_attempt")
+	ErrEndpointStale         = errors.New("endpoint_stale")
+	ErrLeaseExpired          = errors.New("lease_expired")
+	ErrMessageDeadLettered   = errors.New("message_dead_lettered")
+	ErrArtifactNotFound      = errors.New("artifact_not_found")
+	ErrArtifactExists        = errors.New("artifact_version_exists")
+	ErrApprovalNotFound      = errors.New("approval_not_found")
+	ErrApprovalRequired      = errors.New("approval_required")
+	ErrApprovalRejected      = errors.New("approval_not_approved")
+	ErrApprovalExpired       = errors.New("approval_expired")
+	ErrApprovalHashMismatch  = errors.New("approval_hash_mismatch")
+	ErrSelfApproval          = errors.New("self_approval_forbidden")
+	ErrSideEffectNotFound    = errors.New("side_effect_not_found")
+	ErrSideEffectConflict    = errors.New("side_effect_conflict")
 )
 
 func ValidateEndpointRegistration(req contracts.EndpointRegistrationRequest) error {
@@ -84,6 +85,11 @@ func ValidateMessage(req contracts.MessageIngressRequest) error {
 	}
 	if req.QualityGate != "" && !req.QualityGate.Valid() {
 		return ErrInvalidInput
+	}
+	for _, ref := range req.DependsOnMessageRefs {
+		if blank(ref) {
+			return ErrInvalidInput
+		}
 	}
 	return nil
 }

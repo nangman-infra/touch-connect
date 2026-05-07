@@ -14,18 +14,19 @@ func TestWorkerConfigRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	config := WorkerConfig{
-		Backend:      BackendClaude,
-		Model:        "opus[1m]",
-		ServerURL:    "http://127.0.0.1:8080",
-		EndpointRef:  "tc://endpoint/claude_worker",
-		Role:         "code-worker",
-		Capabilities: []string{"code.change", "ai.review"},
-		Permission:   DefaultWorkerPermission,
-		Command:      "/bin/echo",
-		SkillsDir:    filepath.Join(dir, "skills"),
-		WorkDir:      dir,
-		ArtifactDir:  filepath.Join(dir, "artifacts"),
-		Timeout:      (10 * time.Minute).String(),
+		Backend:          BackendClaude,
+		Model:            "opus[1m]",
+		ServerURL:        "http://127.0.0.1:8080",
+		EndpointRef:      "tc://endpoint/claude_worker",
+		Role:             "code-worker",
+		Capabilities:     []string{"code.change", "ai.review"},
+		Permission:       DefaultWorkerPermission,
+		Command:          "/bin/echo",
+		SkillsDir:        filepath.Join(dir, "skills"),
+		WorkDir:          dir,
+		ArtifactDir:      filepath.Join(dir, "artifacts"),
+		Timeout:          (10 * time.Minute).String(),
+		ProgressInterval: (30 * time.Second).String(),
 	}
 	if err := SaveWorkerConfig(path, config); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -41,7 +42,7 @@ func TestWorkerConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("join options: %v", err)
 	}
-	if options.Capabilities != "code.change,ai.review" || options.Timeout != 10*time.Minute {
+	if options.Capabilities != "code.change,ai.review" || options.Timeout != 10*time.Minute || options.ProgressInterval != 30*time.Second {
 		t.Fatalf("unexpected join options: %+v", options)
 	}
 }
@@ -109,6 +110,24 @@ func TestWorkerConfigDefaultsAndValidationBranches(t *testing.T) {
 
 	if _, err := (WorkerConfig{Version: 999}).withDefaults(); err == nil {
 		t.Fatalf("expected unsupported worker config version to fail")
+	}
+	if _, err := (WorkerConfig{ServerURL: "relative"}).withDefaults(); err == nil {
+		t.Fatalf("expected invalid server URL to fail")
+	}
+}
+
+func TestLoadWorkerConfigBacksUpInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte("{bad json"), 0o600); err != nil {
+		t.Fatalf("write invalid config: %v", err)
+	}
+	if _, err := LoadWorkerConfig(path); err == nil || !strings.Contains(err.Error(), "backup written") {
+		t.Fatalf("expected backup error for invalid config, got %v", err)
+	}
+	matches, err := filepath.Glob(path + ".invalid.*")
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected one invalid config backup, matches=%v err=%v", matches, err)
 	}
 }
 

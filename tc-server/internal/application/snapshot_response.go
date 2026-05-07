@@ -30,17 +30,20 @@ func endpointRecords(items []domain.Endpoint) []contracts.EndpointRecord {
 	records := make([]contracts.EndpointRecord, 0, len(items))
 	for _, item := range items {
 		records = append(records, contracts.EndpointRecord{
-			EndpointRef:     item.EndpointRef,
-			DisplayName:     item.DisplayName,
-			ActorID:         item.ActorID,
-			WorkspaceID:     item.WorkspaceID,
-			ConnectionState: item.ConnectionState,
-			Capabilities:    item.Capabilities,
-			ExecutionHints:  item.ExecutionHints,
-			WorkerVersion:   item.WorkerVersion,
-			StartedAt:       item.StartedAt,
-			RegisteredAt:    formatOptionalTime(item.RegisteredAt),
-			LastHeartbeatAt: formatOptionalTime(item.LastHeartbeatAt),
+			EndpointRef:       item.EndpointRef,
+			DisplayName:       item.DisplayName,
+			ActorID:           item.ActorID,
+			WorkspaceID:       item.WorkspaceID,
+			ConnectionState:   item.ConnectionState,
+			Capabilities:      item.Capabilities,
+			ExecutionHints:    item.ExecutionHints,
+			WorkerVersion:     item.WorkerVersion,
+			StartedAt:         item.StartedAt,
+			RegisteredAt:      formatOptionalTime(item.RegisteredAt),
+			LastHeartbeatAt:   formatOptionalTime(item.LastHeartbeatAt),
+			CurrentAttemptRef: item.CurrentAttemptRef,
+			LastActivityAt:    formatOptionalTime(item.LastActivityAt),
+			ProgressSummary:   item.ProgressSummary,
 		})
 	}
 	return records
@@ -50,17 +53,19 @@ func messageRecords(items []domain.Message) []contracts.MessageRecord {
 	records := make([]contracts.MessageRecord, 0, len(items))
 	for _, item := range items {
 		records = append(records, contracts.MessageRecord{
-			MessageRef:        item.MessageRef,
-			DeliveryRef:       item.DeliveryRef,
-			SenderEndpointRef: item.SenderEndpointRef,
-			TargetCapability:  item.TargetCapability,
-			Payload:           item.Payload,
-			Constraints:       item.Constraints,
-			CorrelationRef:    item.CorrelationRef,
-			ReadbackRequired:  item.ReadbackRequired,
-			State:             item.State,
-			AttemptRef:        item.AttemptRef,
-			RedeliveryCount:   item.RedeliveryCount,
+			MessageRef:           item.MessageRef,
+			DeliveryRef:          item.DeliveryRef,
+			SenderEndpointRef:    item.SenderEndpointRef,
+			TargetCapability:     item.TargetCapability,
+			TargetEndpointRef:    item.TargetEndpointRef,
+			DependsOnMessageRefs: append([]string(nil), item.DependsOnMessageRefs...),
+			Payload:              item.Payload,
+			Constraints:          item.Constraints,
+			CorrelationRef:       item.CorrelationRef,
+			ReadbackRequired:     item.ReadbackRequired,
+			State:                item.State,
+			AttemptRef:           item.AttemptRef,
+			RedeliveryCount:      item.RedeliveryCount,
 		})
 	}
 	return records

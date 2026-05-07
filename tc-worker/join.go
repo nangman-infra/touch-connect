@@ -3,6 +3,7 @@ package tcworker
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ type JoinOptions struct {
 	Timeout           time.Duration
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
+	ProgressInterval  time.Duration
 	MaxMessages       int
 	Sandbox           string
 }
@@ -101,6 +103,7 @@ func BuildJoinEnvironment(options JoinOptions) (JoinEnvironment, error) {
 		"TC_WORKER_AI_CLI_TIMEOUT":     accepted.Timeout.String(),
 		"TC_WORKER_POLL_INTERVAL":      accepted.PollInterval.String(),
 		"TC_WORKER_HEARTBEAT_INTERVAL": accepted.HeartbeatInterval.String(),
+		"TC_WORKER_PROGRESS_INTERVAL":  accepted.ProgressInterval.String(),
 	}
 	if accepted.Capabilities != "" {
 		env["TC_WORKER_CAPABILITIES"] = accepted.Capabilities
@@ -135,6 +138,9 @@ func (o JoinOptions) defaultServerAndBackend() (JoinOptions, error) {
 	if strings.TrimSpace(o.ServerURL) == "" {
 		o.ServerURL = "http://127.0.0.1:8080"
 	}
+	if err := validateWorkerServerURL(o.ServerURL); err != nil {
+		return JoinOptions{}, err
+	}
 	o.Backend = strings.ToLower(strings.TrimSpace(o.Backend))
 	if o.Backend == "" {
 		o.Backend = BackendAuto
@@ -147,6 +153,17 @@ func (o JoinOptions) defaultServerAndBackend() (JoinOptions, error) {
 		o.Backend = selected
 	}
 	return o, nil
+}
+
+func validateWorkerServerURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errors.New("worker server URL must be an absolute http:// or https:// URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("worker server URL must use http:// or https://")
+	}
+	return nil
 }
 
 func (o JoinOptions) defaultPaths() (JoinOptions, error) {
@@ -228,7 +245,7 @@ func resolveJoinArtifactDir(artifactDir string, workDir string, backend string) 
 
 func (o JoinOptions) defaultIdentityAndTiming() (JoinOptions, error) {
 	if o.EndpointRef == "" {
-		o.EndpointRef = "tc://endpoint/" + safeJoinPart(o.Backend) + "_worker"
+		o.EndpointRef = defaultJoinEndpointRef(o.Backend)
 	}
 	if o.DisplayName == "" {
 		o.DisplayName = joinTitle(o.Backend) + " worker"
@@ -263,10 +280,24 @@ func (o JoinOptions) defaultIdentityAndTiming() (JoinOptions, error) {
 	if o.HeartbeatInterval < 0 {
 		return JoinOptions{}, errors.New("--heartbeat-interval must not be negative")
 	}
+	if o.ProgressInterval == 0 {
+		o.ProgressInterval = 30 * time.Second
+	}
+	if o.ProgressInterval < 0 {
+		return JoinOptions{}, errors.New("--progress-interval must not be negative")
+	}
 	if o.Sandbox == "" {
 		o.Sandbox = "danger-full-access"
 	}
 	return o, nil
+}
+
+func defaultJoinEndpointRef(backend string) string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = "local"
+	}
+	return "tc://endpoint/" + safeJoinPart(backend) + "_" + safeJoinPart(host) + "_" + fmt.Sprintf("%d", os.Getpid())
 }
 
 func detectBackend() (string, error) {

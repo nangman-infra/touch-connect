@@ -40,6 +40,7 @@ type WorkerConfig struct {
 	Timeout           string   `json:"timeout,omitempty"`
 	PollInterval      string   `json:"poll_interval,omitempty"`
 	HeartbeatInterval string   `json:"heartbeat_interval,omitempty"`
+	ProgressInterval  string   `json:"progress_interval,omitempty"`
 	Sandbox           string   `json:"sandbox,omitempty"`
 }
 
@@ -81,7 +82,11 @@ func LoadWorkerConfig(path string) (WorkerConfig, error) {
 	}
 	var config WorkerConfig
 	if err := json.Unmarshal(body, &config); err != nil {
-		return WorkerConfig{}, err
+		backupPath, backupErr := backupInvalidWorkerConfig(expandHome(path), body)
+		if backupErr != nil {
+			return WorkerConfig{}, err
+		}
+		return WorkerConfig{}, errors.New("worker config is invalid; backup written to " + backupPath + ": " + err.Error())
 	}
 	return config.withDefaults()
 }
@@ -161,6 +166,10 @@ func (c WorkerConfig) JoinOptions() (JoinOptions, error) {
 	if err != nil {
 		return JoinOptions{}, err
 	}
+	progressInterval, err := parseOptionalDuration(config.ProgressInterval)
+	if err != nil {
+		return JoinOptions{}, err
+	}
 	return JoinOptions{
 		ServerURL:         config.ServerURL,
 		Backend:           config.Backend,
@@ -181,6 +190,7 @@ func (c WorkerConfig) JoinOptions() (JoinOptions, error) {
 		Timeout:           timeout,
 		PollInterval:      pollInterval,
 		HeartbeatInterval: heartbeatInterval,
+		ProgressInterval:  progressInterval,
 		Sandbox:           config.Sandbox,
 	}, nil
 }
@@ -217,6 +227,7 @@ func WorkerConfigFromJoinOptions(options JoinOptions) (WorkerConfig, error) {
 		Timeout:           accepted.Timeout.String(),
 		PollInterval:      accepted.PollInterval.String(),
 		HeartbeatInterval: accepted.HeartbeatInterval.String(),
+		ProgressInterval:  accepted.ProgressInterval.String(),
 		Sandbox:           accepted.Sandbox,
 	}, nil
 }
@@ -225,6 +236,9 @@ func (c WorkerConfig) withDefaults() (WorkerConfig, error) {
 	c = defaultWorkerConfigScalars(c)
 	if !supportedWorkerConfigVersion(c.Version) {
 		return WorkerConfig{}, errors.New("unsupported worker config version")
+	}
+	if err := validateWorkerServerURL(c.ServerURL); err != nil {
+		return WorkerConfig{}, err
 	}
 	var err error
 	if c.SkillsDir, err = defaultConfigSkillsDir(c.SkillsDir, c.SkillPaths); err != nil {
@@ -269,6 +283,14 @@ func defaultWorkerConfigScalars(c WorkerConfig) WorkerConfig {
 		c.Sandbox = "danger-full-access"
 	}
 	return c
+}
+
+func backupInvalidWorkerConfig(path string, body []byte) (string, error) {
+	backupPath := path + ".invalid." + time.Now().UTC().Format("20060102T150405Z")
+	if err := os.WriteFile(backupPath, body, 0o600); err != nil {
+		return "", err
+	}
+	return backupPath, nil
 }
 
 func supportedWorkerConfigVersion(version int) bool {

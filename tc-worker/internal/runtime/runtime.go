@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nangman-infra/touch-connect/internal/communication/contracts"
@@ -29,20 +30,26 @@ type ServerClient interface {
 }
 
 type Config struct {
-	EndpointRef    string
-	DisplayName    string
-	ActorID        string
-	WorkspaceID    string
-	WorkerVersion  string
-	Capabilities   []contracts.Capability
-	ExecutionHints []string
+	EndpointRef      string
+	DisplayName      string
+	ActorID          string
+	WorkspaceID      string
+	WorkerVersion    string
+	Capabilities     []contracts.Capability
+	ExecutionHints   []string
+	ProgressInterval time.Duration
 }
 
 type Runtime struct {
-	client        ServerClient
-	config        Config
-	executor      WorkerExecutor
-	artifactStore ExecutionArtifactStore
+	client                     ServerClient
+	config                     Config
+	executor                   WorkerExecutor
+	artifactStore              ExecutionArtifactStore
+	progressMu                 sync.Mutex
+	currentAttemptRef          string
+	lastActivityAt             time.Time
+	progressSummary            string
+	readbackSubmittedByAttempt map[string]bool
 }
 
 type MissingField struct {
@@ -62,7 +69,13 @@ func NewWithExecutorAndArtifacts(client ServerClient, config Config, executor Wo
 	if executor == nil {
 		executor = EchoExecutor{}
 	}
-	return &Runtime{client: client, config: config, executor: executor, artifactStore: artifactStore}
+	return &Runtime{
+		client:                     client,
+		config:                     config,
+		executor:                   executor,
+		artifactStore:              artifactStore,
+		readbackSubmittedByAttempt: map[string]bool{},
+	}
 }
 
 func (r *Runtime) Register(ctx context.Context) error {
@@ -107,10 +120,14 @@ func (r *Runtime) Heartbeat(ctx context.Context) error {
 }
 
 func (r *Runtime) sendHeartbeat(ctx context.Context, state string) error {
+	attemptRef, lastActivityAt, progressSummary := r.progressSnapshot()
 	_, err := r.client.HeartbeatEndpoint(ctx, r.config.EndpointRef, contracts.EndpointHeartbeatRequest{
-		EndpointRef:     r.config.EndpointRef,
-		ConnectionState: state,
-		ObservedAt:      time.Now().UTC().Format(time.RFC3339),
+		EndpointRef:       r.config.EndpointRef,
+		ConnectionState:   state,
+		ObservedAt:        time.Now().UTC().Format(time.RFC3339),
+		CurrentAttemptRef: attemptRef,
+		LastActivityAt:    formatOptionalWorkerTime(lastActivityAt),
+		ProgressSummary:   progressSummary,
 	})
 	return err
 }
@@ -129,6 +146,8 @@ func (r *Runtime) finishClaimAfterAck(ctx context.Context, claim contracts.Claim
 	if err != nil {
 		return "", "", err
 	}
+	r.markProgress(claim.AttemptRef, "executing message "+claim.MessageRef)
+	defer r.clearProgress(claim.AttemptRef)
 	executionCtx, cancelExecution := context.WithCancel(ctx)
 	keeper := r.startLeaseKeeper(ctx, claim.AttemptRef, lease.LeaseExpiresAt, cancelExecution)
 	defer func() {
@@ -146,7 +165,9 @@ func (r *Runtime) finishClaimAfterAck(ctx context.Context, claim contracts.Claim
 		}
 	}()
 	input := r.executionInputForClaim(ctx, claim)
+	progressReporter := r.startProgressReporter(executionCtx, claim)
 	result, err := r.executeAndValidateClaim(executionCtx, ctx, claim, input)
+	progressReporter.stop()
 	if err != nil {
 		return "", ExecutionOutcomeFailed, err
 	}
@@ -221,9 +242,10 @@ func (r *Runtime) completeClaim(ctx context.Context, claim contracts.ClaimMessag
 		return err
 	}
 	if _, err := r.client.CompleteAttempt(ctx, claim.AttemptRef, contracts.CompleteAttemptRequest{
-		EndpointRef:  r.config.EndpointRef,
-		Summary:      result.Summary,
-		ArtifactRefs: result.ArtifactRefs,
+		EndpointRef:      r.config.EndpointRef,
+		Summary:          result.Summary,
+		ArtifactRefs:     result.ArtifactRefs,
+		FollowUpMessages: result.FollowUpMessages,
 	}); err != nil {
 		return err
 	}
@@ -295,6 +317,7 @@ func (r *Runtime) CompleteSideEffectExecution(ctx context.Context, executionRef 
 }
 
 func (r *Runtime) SubmitCheckpoint(ctx context.Context, attemptRef string, state string, summary string, artifactRefs []string) error {
+	r.markProgress(attemptRef, summary)
 	_, err := r.client.SubmitCheckpoint(ctx, attemptRef, contracts.CheckpointRequest{
 		EndpointRef:  r.config.EndpointRef,
 		State:        state,
@@ -305,6 +328,7 @@ func (r *Runtime) SubmitCheckpoint(ctx context.Context, attemptRef string, state
 }
 
 func (r *Runtime) acknowledgeClaim(ctx context.Context, claim contracts.ClaimMessageResponse) error {
+	r.markProgress(claim.AttemptRef, "message claimed")
 	_, err := r.client.SubmitCheckpoint(ctx, claim.AttemptRef, contracts.CheckpointRequest{
 		EndpointRef: r.config.EndpointRef,
 		State:       "claimed",
@@ -327,11 +351,15 @@ func (r *Runtime) submitReadbackWhenRequired(ctx context.Context, claim contract
 	if !claim.ReadbackRequired {
 		return nil
 	}
+	if r.readbackAlreadySubmitted(claim.AttemptRef) {
+		return nil
+	}
 	return r.submitReadback(ctx, claim, fields)
 }
 
 func (r *Runtime) submitReadback(ctx context.Context, claim contracts.ClaimMessageResponse, fields []MissingField) error {
 	missingFields, missingReasons := splitMissingFields(fields)
+	r.markProgress(claim.AttemptRef, "readback submitted")
 	_, err := r.client.SubmitReadback(ctx, claim.AttemptRef, contracts.ReadbackRequest{
 		EndpointRef:    r.config.EndpointRef,
 		Summary:        "readback submitted before execution",
@@ -339,6 +367,9 @@ func (r *Runtime) submitReadback(ctx context.Context, claim contracts.ClaimMessa
 		MissingFields:  missingFields,
 		MissingReasons: missingReasons,
 	})
+	if err == nil {
+		r.markReadbackSubmitted(claim.AttemptRef)
+	}
 	return err
 }
 
@@ -360,12 +391,38 @@ func executionInputFromClaim(claim contracts.ClaimMessageResponse) ExecutionInpu
 
 func (r *Runtime) executionInputForClaim(ctx context.Context, claim contracts.ClaimMessageResponse) ExecutionInput {
 	input := executionInputFromClaim(claim)
+	input.Progress = r.progressCallback(ctx, claim)
 	snapshot, err := r.client.Snapshot(ctx)
 	if err != nil {
 		return input
 	}
 	input.HandoffContext = handoffContextFromSnapshot(claim, snapshot)
 	return input
+}
+
+func (r *Runtime) progressCallback(ctx context.Context, claim contracts.ClaimMessageResponse) func(ExecutionProgress) {
+	return func(progress ExecutionProgress) {
+		summary := strings.TrimSpace(progress.Summary)
+		if summary == "" {
+			summary = strings.TrimSpace(progress.Line)
+		}
+		if summary == "" {
+			return
+		}
+		summary = compactWorkerProgress(summary)
+		r.markProgress(claim.AttemptRef, summary)
+		if progress.Kind != "readback" || !claim.ReadbackRequired || r.readbackAlreadySubmitted(claim.AttemptRef) {
+			return
+		}
+		_, err := r.client.SubmitReadback(ctx, claim.AttemptRef, contracts.ReadbackRequest{
+			EndpointRef:   r.config.EndpointRef,
+			Summary:       "readback marker observed during execution",
+			Understanding: summary,
+		})
+		if err == nil {
+			r.markReadbackSubmitted(claim.AttemptRef)
+		}
+	}
 }
 
 func (r *Runtime) recordExecutionArtifact(ctx context.Context, claim contracts.ClaimMessageResponse, result ExecutionResult) (ExecutionResult, error) {
@@ -397,6 +454,9 @@ func (c Config) Validate() error {
 	}
 	if len(c.Capabilities) == 0 {
 		return errors.New("worker capabilities are required")
+	}
+	if c.ProgressInterval < 0 {
+		return errors.New("worker progress interval must not be negative")
 	}
 	seen := map[string]struct{}{}
 	for _, capability := range c.Capabilities {

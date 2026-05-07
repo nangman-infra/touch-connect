@@ -26,17 +26,24 @@ func WriteVersion(w io.Writer, value contracts.VersionResponse) {
 
 func WriteEndpoints(w io.Writer, items []contracts.EndpointRecord) {
 	for _, item := range items {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.EndpointRef, item.ConnectionState, item.DisplayName, item.WorkerVersion)
+		progress := item.ProgressSummary
+		if item.CurrentAttemptRef != "" {
+			progress = item.CurrentAttemptRef + " " + progress
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", item.EndpointRef, item.ConnectionState, item.DisplayName, item.WorkerVersion, strings.TrimSpace(progress))
 	}
 }
 
 func WriteEndpoint(w io.Writer, item contracts.EndpointRecord) {
-	fmt.Fprintf(w, "endpoint=%s\nstate=%s\nactor=%s\nworkspace=%s\ncapabilities=%s\n",
+	fmt.Fprintf(w, "endpoint=%s\nstate=%s\nactor=%s\nworkspace=%s\ncapabilities=%s\ncurrent_attempt=%s\nlast_activity=%s\nprogress=%s\n",
 		item.EndpointRef,
 		item.ConnectionState,
 		item.ActorID,
 		item.WorkspaceID,
 		strings.Join(sortedCapabilityNames(item.Capabilities), ","),
+		item.CurrentAttemptRef,
+		item.LastActivityAt,
+		item.ProgressSummary,
 	)
 }
 
@@ -53,15 +60,21 @@ func WriteCapabilities(w io.Writer, items map[string][]string) {
 
 func WriteMessages(w io.Writer, items []contracts.MessageRecord) {
 	for _, item := range items {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.MessageRef, item.State, item.TargetCapability, item.Payload.Summary)
+		target := item.TargetCapability
+		if item.TargetEndpointRef != "" {
+			target += "@" + item.TargetEndpointRef
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.MessageRef, item.State, target, item.Payload.Summary)
 	}
 }
 
 func WriteMessage(w io.Writer, item contracts.MessageRecord) {
-	fmt.Fprintf(w, "message=%s\nstate=%s\ncapability=%s\nsummary=%s\ncorrelation=%s\n",
+	fmt.Fprintf(w, "message=%s\nstate=%s\ncapability=%s\ntarget_endpoint=%s\ndepends_on=%s\nsummary=%s\ncorrelation=%s\n",
 		item.MessageRef,
 		item.State,
 		item.TargetCapability,
+		item.TargetEndpointRef,
+		strings.Join(item.DependsOnMessageRefs, ","),
 		item.Payload.Summary,
 		item.CorrelationRef,
 	)

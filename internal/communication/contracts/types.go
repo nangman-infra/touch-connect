@@ -23,9 +23,12 @@ type EndpointRegistrationResponse struct {
 }
 
 type EndpointHeartbeatRequest struct {
-	EndpointRef     string `json:"endpoint_ref"`
-	ConnectionState string `json:"connection_state"`
-	ObservedAt      string `json:"observed_at,omitempty"`
+	EndpointRef       string `json:"endpoint_ref"`
+	ConnectionState   string `json:"connection_state"`
+	ObservedAt        string `json:"observed_at,omitempty"`
+	CurrentAttemptRef string `json:"current_attempt_ref,omitempty"`
+	LastActivityAt    string `json:"last_activity_at,omitempty"`
+	ProgressSummary   string `json:"progress_summary,omitempty"`
 }
 
 type EndpointHeartbeatResponse struct {
@@ -66,12 +69,14 @@ type Constraint struct {
 }
 
 type MessageIngressRequest struct {
-	MessageRef        string       `json:"message_ref,omitempty"`
-	SenderEndpointRef string       `json:"sender_endpoint_ref"`
-	TargetCapability  string       `json:"target_capability"`
-	Payload           Payload      `json:"payload"`
-	Constraints       []Constraint `json:"constraints"`
-	CorrelationRef    string       `json:"correlation_ref,omitempty"`
+	MessageRef           string       `json:"message_ref,omitempty"`
+	SenderEndpointRef    string       `json:"sender_endpoint_ref"`
+	TargetCapability     string       `json:"target_capability"`
+	TargetEndpointRef    string       `json:"target_endpoint_ref,omitempty"`
+	DependsOnMessageRefs []string     `json:"depends_on_message_refs,omitempty"`
+	Payload              Payload      `json:"payload"`
+	Constraints          []Constraint `json:"constraints"`
+	CorrelationRef       string       `json:"correlation_ref,omitempty"`
 	// ReadbackRequired is the v0 boolean projection. When PhraseologyPolicy is set,
 	// the policy readback settings take precedence.
 	ReadbackRequired  bool               `json:"readback_required,omitempty"`
@@ -102,23 +107,25 @@ type ClaimNextMessageResponse struct {
 }
 
 type ClaimMessageResponse struct {
-	MessageRef         string       `json:"message_ref"`
-	AttemptRef         string       `json:"attempt_ref"`
-	EndpointRef        string       `json:"endpoint_ref"`
-	State              string       `json:"state"`
-	LeaseExpiresAt     string       `json:"lease_expires_at"`
-	Takeover           bool         `json:"takeover"`
-	RedeliveryCount    int          `json:"redelivery_count"`
-	LastCheckpointRef  string       `json:"last_checkpoint_ref,omitempty"`
-	ResumeSummary      string       `json:"resume_summary,omitempty"`
-	ResumeArtifactRefs []string     `json:"resume_artifact_refs,omitempty"`
-	ReadbackRequired   bool         `json:"readback_required"`
-	TargetCapability   string       `json:"target_capability"`
-	CorrelationRef     string       `json:"correlation_ref,omitempty"`
-	Payload            Payload      `json:"payload"`
-	Constraints        []Constraint `json:"constraints"`
-	PayloadSummary     string       `json:"payload_summary"`
-	ConstraintSummary  string       `json:"constraint_summary,omitempty"`
+	MessageRef           string       `json:"message_ref"`
+	AttemptRef           string       `json:"attempt_ref"`
+	EndpointRef          string       `json:"endpoint_ref"`
+	State                string       `json:"state"`
+	LeaseExpiresAt       string       `json:"lease_expires_at"`
+	Takeover             bool         `json:"takeover"`
+	RedeliveryCount      int          `json:"redelivery_count"`
+	LastCheckpointRef    string       `json:"last_checkpoint_ref,omitempty"`
+	ResumeSummary        string       `json:"resume_summary,omitempty"`
+	ResumeArtifactRefs   []string     `json:"resume_artifact_refs,omitempty"`
+	ReadbackRequired     bool         `json:"readback_required"`
+	TargetCapability     string       `json:"target_capability"`
+	TargetEndpointRef    string       `json:"target_endpoint_ref,omitempty"`
+	DependsOnMessageRefs []string     `json:"depends_on_message_refs,omitempty"`
+	CorrelationRef       string       `json:"correlation_ref,omitempty"`
+	Payload              Payload      `json:"payload"`
+	Constraints          []Constraint `json:"constraints"`
+	PayloadSummary       string       `json:"payload_summary"`
+	ConstraintSummary    string       `json:"constraint_summary,omitempty"`
 	// ConfidenceBand reflects PhraseologyPolicy compliance, not evidence-supported certainty.
 	ConfidenceBand ConfidenceBand `json:"confidence_band,omitempty"`
 }
@@ -254,14 +261,28 @@ type CompleteSideEffectExecutionResponse struct {
 }
 
 type CompleteAttemptRequest struct {
-	EndpointRef  string   `json:"endpoint_ref"`
-	Summary      string   `json:"summary"`
-	ArtifactRefs []string `json:"artifact_refs,omitempty"`
+	EndpointRef      string                   `json:"endpoint_ref"`
+	Summary          string                   `json:"summary"`
+	ArtifactRefs     []string                 `json:"artifact_refs,omitempty"`
+	FollowUpMessages []FollowUpMessageRequest `json:"follow_up_messages,omitempty"`
 }
 
 type CompleteAttemptResponse struct {
-	AttemptRef string `json:"attempt_ref"`
-	State      string `json:"state"`
+	AttemptRef          string   `json:"attempt_ref"`
+	State               string   `json:"state"`
+	FollowUpMessageRefs []string `json:"follow_up_message_refs,omitempty"`
+}
+
+type FollowUpMessageRequest struct {
+	MessageRef           string          `json:"message_ref,omitempty"`
+	TargetCapability     string          `json:"target_capability"`
+	TargetEndpointRef    string          `json:"target_endpoint_ref,omitempty"`
+	DependsOnMessageRefs []string        `json:"depends_on_message_refs,omitempty"`
+	Summary              string          `json:"summary"`
+	Body                 string          `json:"body"`
+	Constraints          []Constraint    `json:"constraints,omitempty"`
+	ReadbackRequired     bool            `json:"readback_required,omitempty"`
+	QualityGate          QualityGateMode `json:"quality_gate,omitempty"`
 }
 
 type ErrorResponse struct {

@@ -78,6 +78,7 @@ func parseSetupArgs(args []string) (setupFlowOptions, error) {
 	flags.DurationVar(&options.Timeout, "timeout", durationFromEnv("TC_WORKER_AI_CLI_TIMEOUT"), "AI CLI execution timeout")
 	flags.DurationVar(&options.PollInterval, "poll-interval", durationFromEnv("TC_WORKER_POLL_INTERVAL"), "message poll interval")
 	flags.DurationVar(&options.HeartbeatInterval, "heartbeat-interval", durationFromEnv("TC_WORKER_HEARTBEAT_INTERVAL"), "endpoint heartbeat interval")
+	flags.DurationVar(&options.ProgressInterval, "progress-interval", durationFromEnv("TC_WORKER_PROGRESS_INTERVAL"), "in-progress checkpoint interval")
 	flags.StringVar(&options.Sandbox, "sandbox", getenvDefault("TC_WORKER_SANDBOX", "danger-full-access"), "backend sandbox/profile hint where supported")
 	flags.BoolVar(&parsed.Plain, "plain", false, "disable interactive TUI-style chooser")
 	flags.BoolVar(&parsed.AutoAccept, "yes", false, "accept defaults without prompting")
@@ -225,6 +226,9 @@ func applySetupDefaults(options tcworker.JoinOptions) tcworker.JoinOptions {
 	}
 	if options.HeartbeatInterval == 0 {
 		options.HeartbeatInterval = 5 * time.Second
+	}
+	if options.ProgressInterval == 0 {
+		options.ProgressInterval = 30 * time.Second
 	}
 	if strings.TrimSpace(options.Sandbox) == "" {
 		options.Sandbox = "danger-full-access"

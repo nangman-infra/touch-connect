@@ -21,17 +21,20 @@ type FreshnessRecord struct {
 }
 
 type EndpointRecord struct {
-	EndpointRef     string                `json:"endpoint_ref"`
-	DisplayName     string                `json:"display_name"`
-	ActorID         string                `json:"actor_id"`
-	WorkspaceID     string                `json:"workspace_id"`
-	ConnectionState string                `json:"connection_state"`
-	Capabilities    map[string]Capability `json:"capabilities"`
-	ExecutionHints  []string              `json:"execution_hints,omitempty"`
-	WorkerVersion   string                `json:"worker_version"`
-	StartedAt       string                `json:"started_at"`
-	RegisteredAt    string                `json:"registered_at"`
-	LastHeartbeatAt string                `json:"last_heartbeat_at"`
+	EndpointRef       string                `json:"endpoint_ref"`
+	DisplayName       string                `json:"display_name"`
+	ActorID           string                `json:"actor_id"`
+	WorkspaceID       string                `json:"workspace_id"`
+	ConnectionState   string                `json:"connection_state"`
+	Capabilities      map[string]Capability `json:"capabilities"`
+	ExecutionHints    []string              `json:"execution_hints,omitempty"`
+	WorkerVersion     string                `json:"worker_version"`
+	StartedAt         string                `json:"started_at"`
+	RegisteredAt      string                `json:"registered_at"`
+	LastHeartbeatAt   string                `json:"last_heartbeat_at"`
+	CurrentAttemptRef string                `json:"current_attempt_ref,omitempty"`
+	LastActivityAt    string                `json:"last_activity_at,omitempty"`
+	ProgressSummary   string                `json:"progress_summary,omitempty"`
 }
 
 type MessageRecord struct {
@@ -39,6 +42,8 @@ type MessageRecord struct {
 	DeliveryRef           string            `json:"delivery_ref"`
 	SenderEndpointRef     string            `json:"sender_endpoint_ref"`
 	TargetCapability      string            `json:"target_capability"`
+	TargetEndpointRef     string            `json:"target_endpoint_ref,omitempty"`
+	DependsOnMessageRefs  []string          `json:"depends_on_message_refs,omitempty"`
 	Payload               Payload           `json:"payload"`
 	Constraints           []Constraint      `json:"constraints"`
 	CorrelationRef        string            `json:"correlation_ref,omitempty"`

@@ -91,12 +91,14 @@ func (s *Service) ReplayDeadLetter(req contracts.DLQReplayRequest) (contracts.DL
 		return contracts.DLQReplayResponse{}, domain.ErrMessageNotFound
 	}
 	replayed, err := s.IngressMessage(contracts.MessageIngressRequest{
-		SenderEndpointRef: original.SenderEndpointRef,
-		TargetCapability:  original.TargetCapability,
-		Payload:           original.Payload,
-		Constraints:       original.Constraints,
-		CorrelationRef:    original.CorrelationRef,
-		ReadbackRequired:  original.ReadbackRequired,
+		SenderEndpointRef:    original.SenderEndpointRef,
+		TargetCapability:     original.TargetCapability,
+		TargetEndpointRef:    original.TargetEndpointRef,
+		DependsOnMessageRefs: append([]string(nil), original.DependsOnMessageRefs...),
+		Payload:              original.Payload,
+		Constraints:          original.Constraints,
+		CorrelationRef:       original.CorrelationRef,
+		ReadbackRequired:     original.ReadbackRequired,
 	})
 	if err != nil {
 		return contracts.DLQReplayResponse{}, err

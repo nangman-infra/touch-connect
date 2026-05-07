@@ -69,7 +69,7 @@ func (s *Store) CapabilityEndpoints(capability string) []domain.Endpoint {
 	}
 	filtered := make([]domain.Endpoint, 0)
 	for _, endpoint := range endpoints {
-		if _, ok := endpoint.Capabilities[capability]; ok {
+		if domain.EndpointCanHandle(endpoint, capability) {
 			filtered = append(filtered, endpoint)
 		}
 	}

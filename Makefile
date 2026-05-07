@@ -7,8 +7,18 @@ CAPABILITY ?= code.change
 TASK_REF ?= tc://task/dev_demo
 DEMO_SUMMARY ?= Manager requests worker result
 DEMO_BODY_FILE ?= $(CURDIR)/examples/messages/dev-demo-body.md
+WORKER_SERVER_URL ?= http://127.0.0.1:8080
+WORKER_SUBCOMMAND := $(word 2,$(MAKECMDGOALS))
 
-.PHONY: help dev dev-up dev-down dev-logs dev-ps endpoint-list manager manager-watch monitor message-tail send-demo watch-demo history-demo smoke worker host-codex-worker host-claude-worker host-gemini-worker
+ifeq ($(firstword $(MAKECMDGOALS)),worker)
+ifneq ($(WORKER_SUBCOMMAND),)
+.PHONY: $(WORKER_SUBCOMMAND)
+$(WORKER_SUBCOMMAND):
+	@:
+endif
+endif
+
+.PHONY: help dev dev-up dev-down dev-logs dev-ps endpoint-list manager manager-watch monitor message-tail send-demo watch-demo history-demo smoke ensure-dev-server worker worker-join worker-setup host-codex-worker host-claude-worker host-gemini-worker
 
 help:
 	@echo "touch-connect development commands"
@@ -19,7 +29,8 @@ help:
 	@echo "  make dev-logs        follow server/control/NATS logs"
 	@echo "  make dev-ps          show compose service status"
 	@echo ""
-	@echo "  make worker          join a host local AI CLI worker"
+	@echo "  make worker          start local stack if needed, then join a host local AI CLI worker"
+	@echo "  make worker-setup    write or edit local worker config"
 	@echo "  make manager         print one manager cockpit frame"
 	@echo "  make manager-watch   watch manager cockpit for TASK_REF=$(TASK_REF)"
 	@echo "  make endpoint-list   list registered endpoints"
@@ -75,14 +86,52 @@ smoke:
 	$(COMPOSE) run --rm tcctl endpoint list
 	$(COMPOSE) run --rm tcctl message send --capability code.change --summary "compose smoke" --body "Verify compose echo worker can receive and complete a message." --quality-gate=skip
 
-worker:
-	go run ./tc-worker/cmd/tc-worker join --skills-dir $(CURDIR)/examples/skills
+ensure-dev-server:
+	@if [ -n "$$TC_WORKER_SERVER_URL" ]; then \
+		echo "using explicit TC_WORKER_SERVER_URL=$$TC_WORKER_SERVER_URL"; \
+		exit 0; \
+	fi; \
+	if curl -fsS "$(WORKER_SERVER_URL)/healthz" >/dev/null 2>&1; then \
+		echo "tc-server healthy at $(WORKER_SERVER_URL)"; \
+		exit 0; \
+	fi; \
+	echo "tc-server is not healthy at $(WORKER_SERVER_URL); starting local dev stack..."; \
+	$(COMPOSE) up -d --build nats tc-server tc-control; \
+	i=0; \
+	while [ $$i -lt 60 ]; do \
+		if curl -fsS "$(WORKER_SERVER_URL)/healthz" >/dev/null 2>&1; then \
+			echo "tc-server healthy at $(WORKER_SERVER_URL)"; \
+			exit 0; \
+		fi; \
+		i=$$((i + 1)); \
+		sleep 1; \
+	done; \
+	echo "tc-server did not become healthy at $(WORKER_SERVER_URL)"; \
+	$(COMPOSE) ps; \
+	exit 1
 
-host-codex-worker:
+worker:
+	@case "$(WORKER_SUBCOMMAND)" in \
+		""|join) \
+			$(MAKE) ensure-dev-server && go run ./tc-worker/cmd/tc-worker join --skills-dir $(CURDIR)/examples/skills ;; \
+		setup) \
+			$(MAKE) worker-setup ;; \
+		*) \
+			echo "unknown worker subcommand: $(WORKER_SUBCOMMAND)"; \
+			echo "use: make worker, make worker join, or make worker setup"; \
+			exit 2 ;; \
+	esac
+
+worker-join: worker
+
+worker-setup:
+	go run ./tc-worker/cmd/tc-worker setup --skills-dir $(CURDIR)/examples/skills
+
+host-codex-worker: ensure-dev-server
 	go run ./tc-worker/cmd/tc-worker join --backend codex --model gpt-5.4-mini --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_codex_worker --permission auto-approve
 
-host-claude-worker:
+host-claude-worker: ensure-dev-server
 	go run ./tc-worker/cmd/tc-worker join --backend claude --model "$(CLAUDE_MODEL)" --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_claude_worker --permission auto-approve
 
-host-gemini-worker:
+host-gemini-worker: ensure-dev-server
 	go run ./tc-worker/cmd/tc-worker join --backend gemini --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_gemini_worker --permission auto-approve

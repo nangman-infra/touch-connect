@@ -252,7 +252,10 @@ func startJoinedWorker(ctx context.Context, env tcworker.JoinEnvironment, plain 
 		return tcworker.RunWorkerStatusTUI(ctx, env, runEnvWorker)
 	}
 	log.Printf("tc-worker joining backend=%s model=%s endpoint=%s server=%s", env.Backend, env.Model, env.Env["TC_WORKER_ENDPOINT_REF"], env.Env["TC_WORKER_SERVER_URL"])
-	return runEnvWorker(ctx)
+	if err := runEnvWorker(ctx); err != nil {
+		return explainWorkerStartError(err, env.Env["TC_WORKER_SERVER_URL"])
+	}
+	return nil
 }
 
 func resolveJoinOptions(ctx context.Context, parsed joinRunOptions) (tcworker.JoinOptions, error) {
@@ -289,7 +292,7 @@ func resolveJoinOptions(ctx context.Context, parsed joinRunOptions) (tcworker.Jo
 		base = parsed.Options
 	}
 	base = applyJoinFlagOverrides(base, parsed.Options, parsed.Visited)
-	base = discoverJoinServerIfNeeded(ctx, base, parsed, configExists)
+	base = discoverJoinServerIfNeeded(ctx, base, parsed)
 	return base, nil
 }
 
@@ -322,53 +325,47 @@ func applyJoinFlagOverrides(base tcworker.JoinOptions, flags tcworker.JoinOption
 }
 
 func applyStringOverrides(base *tcworker.JoinOptions, flags tcworker.JoinOptions, visited map[string]bool) {
-	overrides := []struct {
-		names []string
-		set   func()
-	}{
-		{[]string{flagServerURL, "server"}, func() { base.ServerURL = flags.ServerURL }},
-		{[]string{"backend"}, func() { base.Backend = flags.Backend }},
-		{[]string{"model"}, func() { base.Model = flags.Model }},
-		{[]string{"command"}, func() { base.Command = flags.Command }},
-		{[]string{flagEndpointRef, "endpoint"}, func() { base.EndpointRef = flags.EndpointRef }},
-		{[]string{"display-name"}, func() { base.DisplayName = flags.DisplayName }},
-		{[]string{"actor-id"}, func() { base.ActorID = flags.ActorID }},
-		{[]string{"workspace-id"}, func() { base.WorkspaceID = flags.WorkspaceID }},
-		{[]string{"role"}, func() { base.Role = flags.Role }},
-		{[]string{"capabilities"}, func() { base.Capabilities = flags.Capabilities }},
-		{[]string{"permission"}, func() { base.Permission = flags.Permission }},
-		{[]string{flagSkillsDir}, func() { base.SkillsDir = flags.SkillsDir }},
-		{[]string{"workdir"}, func() { base.WorkDir = flags.WorkDir }},
-		{[]string{"artifact-dir"}, func() { base.ArtifactDir = flags.ArtifactDir }},
-		{[]string{"sandbox"}, func() { base.Sandbox = flags.Sandbox }},
-	}
-	for _, item := range overrides {
-		if anyVisited(visited, item.names...) {
-			item.set()
-		}
+	applyStringOverride(visited, []string{flagServerURL, "server"}, []string{"TC_WORKER_SERVER_URL"}, &base.ServerURL, flags.ServerURL)
+	applyStringOverride(visited, []string{"backend"}, []string{"TC_WORKER_BACKEND"}, &base.Backend, flags.Backend)
+	applyStringOverride(visited, []string{"model"}, []string{"TC_WORKER_MODEL"}, &base.Model, flags.Model)
+	applyStringOverride(visited, []string{"command"}, []string{"TC_WORKER_AI_CLI_COMMAND"}, &base.Command, flags.Command)
+	applyStringOverride(visited, []string{flagEndpointRef, "endpoint"}, []string{"TC_WORKER_ENDPOINT_REF"}, &base.EndpointRef, flags.EndpointRef)
+	applyStringOverride(visited, []string{"display-name"}, []string{"TC_WORKER_DISPLAY_NAME"}, &base.DisplayName, flags.DisplayName)
+	applyStringOverride(visited, []string{"actor-id"}, []string{"TC_WORKER_ACTOR_ID"}, &base.ActorID, flags.ActorID)
+	applyStringOverride(visited, []string{"workspace-id"}, []string{"TC_WORKER_WORKSPACE_ID"}, &base.WorkspaceID, flags.WorkspaceID)
+	applyStringOverride(visited, []string{"role"}, []string{"TC_WORKER_ROLE"}, &base.Role, flags.Role)
+	applyStringOverride(visited, []string{"capabilities"}, []string{"TC_WORKER_CAPABILITIES"}, &base.Capabilities, flags.Capabilities)
+	applyStringOverride(visited, []string{"permission"}, []string{"TC_WORKER_PERMISSION"}, &base.Permission, flags.Permission)
+	applyStringOverride(visited, []string{flagSkillsDir}, []string{"TC_WORKER_SKILLS_DIR"}, &base.SkillsDir, flags.SkillsDir)
+	applyStringOverride(visited, []string{"workdir"}, []string{"TC_WORKER_AI_CLI_WORKDIR", "TC_WORKER_WORKDIR"}, &base.WorkDir, flags.WorkDir)
+	applyStringOverride(visited, []string{"artifact-dir"}, []string{"TC_WORKER_ARTIFACT_DIR"}, &base.ArtifactDir, flags.ArtifactDir)
+	applyStringOverride(visited, []string{"sandbox"}, []string{"TC_WORKER_SANDBOX"}, &base.Sandbox, flags.Sandbox)
+}
+
+func applyStringOverride(visited map[string]bool, names []string, env []string, target *string, value string) {
+	if anyVisited(visited, names...) || anyEnvSet(env...) {
+		*target = value
 	}
 }
 
 func applyDurationOverrides(base *tcworker.JoinOptions, flags tcworker.JoinOptions, visited map[string]bool) {
-	if visited["timeout"] {
-		base.Timeout = flags.Timeout
-	}
-	if visited["poll-interval"] {
-		base.PollInterval = flags.PollInterval
-	}
-	if visited["heartbeat-interval"] {
-		base.HeartbeatInterval = flags.HeartbeatInterval
-	}
-	if visited["progress-interval"] {
-		base.ProgressInterval = flags.ProgressInterval
-	}
-	if visited["max-messages"] {
+	applyDurationOverride(visited, "timeout", "TC_WORKER_AI_CLI_TIMEOUT", &base.Timeout, flags.Timeout)
+	applyDurationOverride(visited, "poll-interval", "TC_WORKER_POLL_INTERVAL", &base.PollInterval, flags.PollInterval)
+	applyDurationOverride(visited, "heartbeat-interval", "TC_WORKER_HEARTBEAT_INTERVAL", &base.HeartbeatInterval, flags.HeartbeatInterval)
+	applyDurationOverride(visited, "progress-interval", "TC_WORKER_PROGRESS_INTERVAL", &base.ProgressInterval, flags.ProgressInterval)
+	if visited["max-messages"] || anyEnvSet("TC_WORKER_MAX_MESSAGES") {
 		base.MaxMessages = flags.MaxMessages
 	}
 }
 
+func applyDurationOverride(visited map[string]bool, name string, env string, target *time.Duration, value time.Duration) {
+	if visited[name] || anyEnvSet(env) {
+		*target = value
+	}
+}
+
 func applySliceOverrides(base *tcworker.JoinOptions, flags tcworker.JoinOptions, visited map[string]bool) {
-	if visited["args"] {
+	if visited["args"] || anyEnvSet("TC_WORKER_AI_CLI_ARGS") {
 		base.Args = append([]string(nil), flags.Args...)
 	}
 	if visited["skill"] {
@@ -385,11 +382,17 @@ func anyVisited(visited map[string]bool, names ...string) bool {
 	return false
 }
 
-func discoverJoinServerIfNeeded(ctx context.Context, base tcworker.JoinOptions, parsed joinRunOptions, configExists bool) tcworker.JoinOptions {
-	if workerServerInputProvided(parsed.Visited) {
-		return base
+func anyEnvSet(keys ...string) bool {
+	for _, key := range keys {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return true
+		}
 	}
-	if configExists && !shouldSetupBeforeJoin(parsed, configExists) {
+	return false
+}
+
+func discoverJoinServerIfNeeded(ctx context.Context, base tcworker.JoinOptions, parsed joinRunOptions) tcworker.JoinOptions {
+	if workerServerInputProvided(parsed.Visited) {
 		return base
 	}
 	if strings.TrimSpace(base.ServerURL) != "" && base.ServerURL != tcworker.DefaultWorkerServerURL {
@@ -403,6 +406,19 @@ func discoverJoinServerIfNeeded(ctx context.Context, base tcworker.JoinOptions, 
 
 func workerServerInputProvided(visited map[string]bool) bool {
 	return anyVisited(visited, flagServerURL, "server") || strings.TrimSpace(os.Getenv("TC_WORKER_SERVER_URL")) != ""
+}
+
+func explainWorkerStartError(err error, serverURL string) error {
+	message := err.Error()
+	if !strings.Contains(message, "connection refused") &&
+		!strings.Contains(message, "no such host") &&
+		!strings.Contains(message, "i/o timeout") {
+		return err
+	}
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = tcworker.DefaultWorkerServerURL
+	}
+	return fmt.Errorf("tc-worker could not reach tc-server at %s\n\nStart the local development stack, then retry:\n  make dev-up\n  make worker\n\nUse a remote server instead:\n  TC_WORKER_SERVER_URL=http://<server>:8080 make worker\n\noriginal error: %w", serverURL, err)
 }
 
 type repeatedFlag []string

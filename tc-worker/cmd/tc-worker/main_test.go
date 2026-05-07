@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -408,6 +409,27 @@ func TestResolveJoinOptionsLoadsConfigAndAppliesOverrides(t *testing.T) {
 	if options.Role != "reviewer" || options.Capabilities != "ai.review" || options.Backend != tcworker.BackendCodex {
 		t.Fatalf("unexpected resolved options: %+v", options)
 	}
+
+	t.Setenv("TC_WORKER_SERVER_URL", "http://192.168.10.88:8080")
+	t.Setenv("TC_WORKER_MODEL", "opus")
+	t.Setenv("TC_WORKER_MAX_MESSAGES", "4")
+	envOptions, err := resolveJoinOptions(context.Background(), joinRunOptions{
+		ConfigPath: configPath,
+		Plain:      true,
+		Yes:        true,
+		Visited:    map[string]bool{},
+		Options: tcworker.JoinOptions{
+			ServerURL:   os.Getenv("TC_WORKER_SERVER_URL"),
+			Model:       os.Getenv("TC_WORKER_MODEL"),
+			MaxMessages: 4,
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve join options with env overrides: %v", err)
+	}
+	if envOptions.ServerURL != "http://192.168.10.88:8080" || envOptions.Model != "opus" || envOptions.MaxMessages != 4 {
+		t.Fatalf("expected environment to override saved config, got %+v", envOptions)
+	}
 }
 
 func TestResolveJoinOptionsInitializesDefaultConfigWhenMissing(t *testing.T) {
@@ -453,28 +475,28 @@ func TestDiscoverJoinServerHonorsExplicitInputsAndSavedConfig(t *testing.T) {
 
 	explicit := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: "http://explicit:8080"}, joinRunOptions{
 		Visited: map[string]bool{"server": true},
-	}, false)
+	})
 	if explicit.ServerURL != "http://explicit:8080" {
 		t.Fatalf("explicit server should not be discovered over: %+v", explicit)
 	}
 
 	savedConfig := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: tcworker.DefaultWorkerServerURL}, joinRunOptions{
 		Visited: map[string]bool{},
-	}, true)
-	if savedConfig.ServerURL != tcworker.DefaultWorkerServerURL {
-		t.Fatalf("saved config should not be discovered over: %+v", savedConfig)
+	})
+	if savedConfig.ServerURL != "http://192.168.10.55:8080" {
+		t.Fatalf("saved default server should be eligible for LAN discovery: %+v", savedConfig)
 	}
 
 	customBase := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: "http://configured:8080"}, joinRunOptions{
 		Visited: map[string]bool{},
-	}, false)
+	})
 	if customBase.ServerURL != "http://configured:8080" {
 		t.Fatalf("custom base server should not be discovered over: %+v", customBase)
 	}
 
 	defaultBase := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: tcworker.DefaultWorkerServerURL}, joinRunOptions{
 		Visited: map[string]bool{},
-	}, false)
+	})
 	if defaultBase.ServerURL != "http://192.168.10.55:8080" {
 		t.Fatalf("default server should be replaced by discovery: %+v", defaultBase)
 	}
@@ -535,6 +557,121 @@ func TestJoinInputHelpersCoverEnvironmentDrivenExplicitness(t *testing.T) {
 	t.Setenv("TC_WORKER_BACKEND", "claude")
 	if !hasExplicitJoinInput(map[string]bool{}) {
 		t.Fatalf("backend environment should be explicit")
+	}
+}
+
+func TestApplyJoinFlagOverridesHonorsEnvironment(t *testing.T) {
+	clearWorkerEnvForTest(t)
+	env := map[string]string{
+		"TC_WORKER_SERVER_URL":         "http://env-server:8080",
+		"TC_WORKER_BACKEND":            tcworker.BackendGemini,
+		"TC_WORKER_MODEL":              "gemini-custom",
+		"TC_WORKER_AI_CLI_COMMAND":     "/mock/bin/gemini",
+		"TC_WORKER_ENDPOINT_REF":       "tc://endpoint/env_worker",
+		"TC_WORKER_DISPLAY_NAME":       "Env Worker",
+		"TC_WORKER_ACTOR_ID":           "actor.env",
+		"TC_WORKER_WORKSPACE_ID":       "workspace.env",
+		"TC_WORKER_ROLE":               "researcher",
+		"TC_WORKER_CAPABILITIES":       "ai.research,ai.review",
+		"TC_WORKER_PERMISSION":         "auto-approve",
+		"TC_WORKER_SKILLS_DIR":         "/tmp/env-skills",
+		"TC_WORKER_AI_CLI_WORKDIR":     "/tmp/env-work",
+		"TC_WORKER_ARTIFACT_DIR":       "/tmp/env-artifacts",
+		"TC_WORKER_SANDBOX":            "danger-full-access",
+		"TC_WORKER_AI_CLI_TIMEOUT":     "9m",
+		"TC_WORKER_POLL_INTERVAL":      "700ms",
+		"TC_WORKER_HEARTBEAT_INTERVAL": "7s",
+		"TC_WORKER_PROGRESS_INTERVAL":  "35s",
+		"TC_WORKER_MAX_MESSAGES":       "6",
+		"TC_WORKER_AI_CLI_ARGS":        "-p,--model,gemini-custom",
+	}
+	for key, value := range env {
+		t.Setenv(key, value)
+	}
+	flags := tcworker.JoinOptions{
+		ServerURL:         env["TC_WORKER_SERVER_URL"],
+		Backend:           env["TC_WORKER_BACKEND"],
+		Model:             env["TC_WORKER_MODEL"],
+		Command:           env["TC_WORKER_AI_CLI_COMMAND"],
+		EndpointRef:       env["TC_WORKER_ENDPOINT_REF"],
+		DisplayName:       env["TC_WORKER_DISPLAY_NAME"],
+		ActorID:           env["TC_WORKER_ACTOR_ID"],
+		WorkspaceID:       env["TC_WORKER_WORKSPACE_ID"],
+		Role:              env["TC_WORKER_ROLE"],
+		Capabilities:      env["TC_WORKER_CAPABILITIES"],
+		Permission:        env["TC_WORKER_PERMISSION"],
+		SkillsDir:         env["TC_WORKER_SKILLS_DIR"],
+		WorkDir:           env["TC_WORKER_AI_CLI_WORKDIR"],
+		ArtifactDir:       env["TC_WORKER_ARTIFACT_DIR"],
+		Sandbox:           env["TC_WORKER_SANDBOX"],
+		Timeout:           9 * time.Minute,
+		PollInterval:      700 * time.Millisecond,
+		HeartbeatInterval: 7 * time.Second,
+		ProgressInterval:  35 * time.Second,
+		MaxMessages:       6,
+		Args:              []string{"-p", "--model", "gemini-custom"},
+	}
+	got := applyJoinFlagOverrides(tcworker.JoinOptions{
+		ServerURL:    "http://config-server:8080",
+		Backend:      tcworker.BackendClaude,
+		Model:        "opus[1m]",
+		Command:      "/mock/bin/claude",
+		EndpointRef:  "tc://endpoint/config_worker",
+		Role:         "code-worker",
+		Capabilities: "code.change",
+	}, flags, map[string]bool{})
+	if got.ServerURL != flags.ServerURL ||
+		got.Backend != flags.Backend ||
+		got.Model != flags.Model ||
+		got.Command != flags.Command ||
+		got.EndpointRef != flags.EndpointRef ||
+		got.DisplayName != flags.DisplayName ||
+		got.ActorID != flags.ActorID ||
+		got.WorkspaceID != flags.WorkspaceID ||
+		got.Role != flags.Role ||
+		got.Capabilities != flags.Capabilities ||
+		got.Permission != flags.Permission ||
+		got.SkillsDir != flags.SkillsDir ||
+		got.WorkDir != flags.WorkDir ||
+		got.ArtifactDir != flags.ArtifactDir ||
+		got.Sandbox != flags.Sandbox ||
+		got.Timeout != flags.Timeout ||
+		got.PollInterval != flags.PollInterval ||
+		got.HeartbeatInterval != flags.HeartbeatInterval ||
+		got.ProgressInterval != flags.ProgressInterval ||
+		got.MaxMessages != flags.MaxMessages ||
+		strings.Join(got.Args, ",") != strings.Join(flags.Args, ",") {
+		t.Fatalf("expected env-backed flags to override config:\n got=%+v\nwant=%+v", got, flags)
+	}
+	if !anyEnvSet("TC_WORKER_SERVER_URL", "TC_WORKER_DOES_NOT_EXIST") {
+		t.Fatalf("expected anyEnvSet to see configured server env")
+	}
+	if anyEnvSet("TC_WORKER_DOES_NOT_EXIST") {
+		t.Fatalf("unexpected missing env hit")
+	}
+}
+
+func TestExplainWorkerStartErrorGivesActionableServerGuidance(t *testing.T) {
+	err := explainWorkerStartError(
+		errors.New(`Get "http://127.0.0.1:8080/healthz": dial tcp 127.0.0.1:8080: connect: connection refused`),
+		"http://127.0.0.1:8080",
+	)
+	if err == nil {
+		t.Fatalf("expected actionable error")
+	}
+	message := err.Error()
+	for _, want := range []string{"could not reach tc-server", "make dev-up", "make worker", "TC_WORKER_SERVER_URL"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("expected worker start error to contain %q:\n%s", want, message)
+		}
+	}
+	unchanged := errors.New("permission denied")
+	if got := explainWorkerStartError(unchanged, ""); got != unchanged {
+		t.Fatalf("unrelated errors should pass through unchanged")
+	}
+	blankServer := explainWorkerStartError(errors.New("lookup tc-server.local: no such host"), "")
+	if blankServer == nil || !strings.Contains(blankServer.Error(), tcworker.DefaultWorkerServerURL) {
+		t.Fatalf("blank server should fall back to default URL, got %v", blankServer)
 	}
 }
 

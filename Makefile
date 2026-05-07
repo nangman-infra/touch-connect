@@ -1,5 +1,7 @@
 COMPOSE_FILE ?= docker-compose.dev.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE)
+TC_DEV_DATA_DIR ?= $(CURDIR)/.touch-connect/dev
+export TC_DEV_DATA_DIR
 TCCTL ?= go run ./tcctl/cmd/tcctl
 TCCTL_COMPOSE ?= $(COMPOSE) run --rm tcctl
 CLAUDE_MODEL ?= opus[1m]
@@ -18,12 +20,13 @@ $(WORKER_SUBCOMMAND):
 endif
 endif
 
-.PHONY: help dev dev-up dev-down dev-logs dev-ps endpoint-list manager manager-watch monitor message-tail send-demo watch-demo history-demo smoke ensure-dev-server worker worker-join worker-setup host-codex-worker host-claude-worker host-gemini-worker
+.PHONY: help dev dev-storage dev-up dev-down dev-logs dev-ps endpoint-list manager manager-watch monitor message-tail send-demo watch-demo history-demo smoke ensure-dev-server worker worker-join worker-setup host-codex-worker host-claude-worker host-gemini-worker
 
 help:
 	@echo "touch-connect development commands"
 	@echo ""
 	@echo "  make dev             foreground NATS + tc-server + tc-control"
+	@echo "  make dev-storage     create project-local dev bind-mount directories"
 	@echo "  make dev-up          detached NATS + tc-server + tc-control"
 	@echo "  make dev-down        stop compose stack"
 	@echo "  make dev-logs        follow server/control/NATS logs"
@@ -42,10 +45,14 @@ help:
 	@echo "  make history-demo    print task history for TASK_REF=$(TASK_REF)"
 	@echo "  make smoke           run compose echo worker smoke path"
 
-dev:
+dev-storage:
+	mkdir -p "$(TC_DEV_DATA_DIR)/server" "$(TC_DEV_DATA_DIR)/nats" "$(TC_DEV_DATA_DIR)/artifacts"
+	chmod 0777 "$(TC_DEV_DATA_DIR)/server" "$(TC_DEV_DATA_DIR)/nats" "$(TC_DEV_DATA_DIR)/artifacts"
+
+dev: dev-storage
 	$(COMPOSE) up --build nats tc-server tc-control
 
-dev-up:
+dev-up: dev-storage
 	$(COMPOSE) up -d --build nats tc-server tc-control
 
 dev-down:
@@ -81,7 +88,7 @@ watch-demo:
 history-demo:
 	$(TCCTL) task history "$(TASK_REF)"
 
-smoke:
+smoke: dev-storage
 	$(COMPOSE) --profile smoke up -d --build nats tc-server tc-control tc-worker-echo
 	$(COMPOSE) run --rm tcctl endpoint list
 	$(COMPOSE) run --rm tcctl message send --capability code.change --summary "compose smoke" --body "Verify compose echo worker can receive and complete a message." --quality-gate=skip
@@ -96,6 +103,7 @@ ensure-dev-server:
 		exit 0; \
 	fi; \
 	echo "tc-server is not healthy at $(WORKER_SERVER_URL); starting local dev stack..."; \
+	$(MAKE) dev-storage; \
 	$(COMPOSE) up -d --build nats tc-server tc-control; \
 	i=0; \
 	while [ $$i -lt 60 ]; do \

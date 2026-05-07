@@ -1,8 +1,11 @@
 .git
 .gitignore
 .claude
+.touch-connect
+.local
 docs
 **/docs
+deploy/onprem/data
 tmp
 dist
 build

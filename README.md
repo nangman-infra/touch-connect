@@ -48,6 +48,16 @@ Use `make dev` for the foreground server view during local work. Use detached mo
 make dev-up
 ```
 
+Dev storage is project-local and intentionally ignored by Git:
+
+```txt
+/Volumes/WD/Developments/touch-connect/.touch-connect/dev/server/touch-connect.db
+/Volumes/WD/Developments/touch-connect/.touch-connect/dev/nats/
+/Volumes/WD/Developments/touch-connect/.touch-connect/dev/artifacts/
+```
+
+This keeps SQLite, JetStream, and smoke-worker artifacts out of Docker named volumes, so a local Docker Desktop VM disk fill-up does not silently turn NATS storage into `0 B`. Override the location with `TC_DEV_DATA_DIR=/absolute/path` when needed.
+
 Common development commands:
 
 ```sh

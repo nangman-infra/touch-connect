@@ -195,10 +195,11 @@ type recoverableDropClient struct {
 }
 
 type successfulLoopClient struct {
-	claim         contracts.ClaimMessageResponse
-	claims        int
-	completed     int
-	lastHeartbeat contracts.EndpointHeartbeatRequest
+	claim              contracts.ClaimMessageResponse
+	claims             int
+	completed          int
+	lastHeartbeat      contracts.EndpointHeartbeatRequest
+	checkpointRequests []contracts.CheckpointRequest
 }
 
 type staticExecutor struct {
@@ -247,7 +248,8 @@ func (c *successfulLoopClient) ClaimNextMessage(context.Context, contracts.Claim
 	return contracts.ClaimNextMessageResponse{Claim: &c.claim}, nil
 }
 
-func (c *successfulLoopClient) SubmitCheckpoint(context.Context, string, contracts.CheckpointRequest) (contracts.CheckpointResponse, error) {
+func (c *successfulLoopClient) SubmitCheckpoint(_ context.Context, _ string, req contracts.CheckpointRequest) (contracts.CheckpointResponse, error) {
+	c.checkpointRequests = append(c.checkpointRequests, req)
 	return contracts.CheckpointResponse{}, nil
 }
 

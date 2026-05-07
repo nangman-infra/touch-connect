@@ -108,6 +108,38 @@ func TestHeartbeatIncludesCurrentAttemptProgress(t *testing.T) {
 	}
 }
 
+func TestHeartbeatRefreshesDynamicCapabilities(t *testing.T) {
+	client := &successfulLoopClient{}
+	executor := dynamicCapabilityExecutor{
+		capabilities: []contracts.Capability{{Name: "ai.review"}},
+		result:       ExecutionResult{Outcome: ExecutionOutcomeCompleted, Summary: "done"},
+	}
+	worker := NewWithExecutor(client, Config{
+		EndpointRef:   "tc://endpoint/worker_dynamic_capabilities",
+		DisplayName:   "dynamic capability worker",
+		ActorID:       "actor.dynamic",
+		WorkspaceID:   "workspace.dynamic",
+		WorkerVersion: "0.1.0-dev",
+		Capabilities:  []contracts.Capability{{Name: "code.change"}},
+	}, executor)
+
+	if err := worker.Heartbeat(context.Background()); err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+	if len(client.advertisedCapabilities) != 1 || client.advertisedCapabilities[0].Name != "ai.review" {
+		t.Fatalf("expected re-advertised dynamic capability, got %+v", client.advertisedCapabilities)
+	}
+	if len(worker.config.Capabilities) != 1 || worker.config.Capabilities[0].Name != "ai.review" {
+		t.Fatalf("expected worker config to use refreshed capability, got %+v", worker.config.Capabilities)
+	}
+	if err := worker.Heartbeat(context.Background()); err != nil {
+		t.Fatalf("second heartbeat: %v", err)
+	}
+	if client.advertiseCalls != 1 {
+		t.Fatalf("expected unchanged dynamic capabilities to skip duplicate advertise, got %d calls", client.advertiseCalls)
+	}
+}
+
 func TestFinishClaimBranchesForExecutorFailuresAndTerminalOutcomes(t *testing.T) {
 	claim := contracts.ClaimMessageResponse{
 		MessageRef:       "tc://message/msg_finish",
@@ -195,11 +227,13 @@ type recoverableDropClient struct {
 }
 
 type successfulLoopClient struct {
-	claim              contracts.ClaimMessageResponse
-	claims             int
-	completed          int
-	lastHeartbeat      contracts.EndpointHeartbeatRequest
-	checkpointRequests []contracts.CheckpointRequest
+	claim                  contracts.ClaimMessageResponse
+	claims                 int
+	completed              int
+	advertiseCalls         int
+	advertisedCapabilities []contracts.Capability
+	lastHeartbeat          contracts.EndpointHeartbeatRequest
+	checkpointRequests     []contracts.CheckpointRequest
 }
 
 type staticExecutor struct {
@@ -209,6 +243,19 @@ type staticExecutor struct {
 
 func (e staticExecutor) Execute(context.Context, ExecutionInput) (ExecutionResult, error) {
 	return e.result, e.err
+}
+
+type dynamicCapabilityExecutor struct {
+	capabilities []contracts.Capability
+	result       ExecutionResult
+}
+
+func (e dynamicCapabilityExecutor) Execute(context.Context, ExecutionInput) (ExecutionResult, error) {
+	return e.result, nil
+}
+
+func (e dynamicCapabilityExecutor) RefreshCapabilities(context.Context) ([]contracts.Capability, error) {
+	return append([]contracts.Capability(nil), e.capabilities...), nil
 }
 
 func (c *successfulLoopClient) Health(context.Context) (contracts.HealthResponse, error) {
@@ -232,7 +279,9 @@ func (c *successfulLoopClient) HeartbeatEndpoint(_ context.Context, _ string, re
 	return contracts.EndpointHeartbeatResponse{}, nil
 }
 
-func (c *successfulLoopClient) AdvertiseCapabilities(context.Context, string, contracts.CapabilityAdvertisementRequest) (contracts.CapabilityAdvertisementResponse, error) {
+func (c *successfulLoopClient) AdvertiseCapabilities(_ context.Context, _ string, req contracts.CapabilityAdvertisementRequest) (contracts.CapabilityAdvertisementResponse, error) {
+	c.advertiseCalls++
+	c.advertisedCapabilities = append([]contracts.Capability(nil), req.Capabilities...)
 	return contracts.CapabilityAdvertisementResponse{}, nil
 }
 

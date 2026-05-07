@@ -446,6 +446,98 @@ func TestResolveJoinOptionsInitializesDefaultConfigWhenMissing(t *testing.T) {
 	}
 }
 
+func TestDiscoverJoinServerHonorsExplicitInputsAndSavedConfig(t *testing.T) {
+	clearWorkerEnvForTest(t)
+	stubWorkerServerDiscovery(t, "http://192.168.10.55:8080")
+	ctx := context.Background()
+
+	explicit := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: "http://explicit:8080"}, joinRunOptions{
+		Visited: map[string]bool{"server": true},
+	}, false)
+	if explicit.ServerURL != "http://explicit:8080" {
+		t.Fatalf("explicit server should not be discovered over: %+v", explicit)
+	}
+
+	savedConfig := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: tcworker.DefaultWorkerServerURL}, joinRunOptions{
+		Visited: map[string]bool{},
+	}, true)
+	if savedConfig.ServerURL != tcworker.DefaultWorkerServerURL {
+		t.Fatalf("saved config should not be discovered over: %+v", savedConfig)
+	}
+
+	customBase := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: "http://configured:8080"}, joinRunOptions{
+		Visited: map[string]bool{},
+	}, false)
+	if customBase.ServerURL != "http://configured:8080" {
+		t.Fatalf("custom base server should not be discovered over: %+v", customBase)
+	}
+
+	defaultBase := discoverJoinServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: tcworker.DefaultWorkerServerURL}, joinRunOptions{
+		Visited: map[string]bool{},
+	}, false)
+	if defaultBase.ServerURL != "http://192.168.10.55:8080" {
+		t.Fatalf("default server should be replaced by discovery: %+v", defaultBase)
+	}
+}
+
+func TestWorkerServerInputProvidedFromFlagsAndEnvironment(t *testing.T) {
+	clearWorkerEnvForTest(t)
+	if workerServerInputProvided(map[string]bool{}) {
+		t.Fatalf("empty environment and flags should not count as explicit server input")
+	}
+	if !workerServerInputProvided(map[string]bool{"server-url": true}) {
+		t.Fatalf("server-url flag should count as explicit server input")
+	}
+	if !workerServerInputProvided(map[string]bool{"server": true}) {
+		t.Fatalf("server alias flag should count as explicit server input")
+	}
+	t.Setenv("TC_WORKER_SERVER_URL", "http://from-env:8080")
+	if !workerServerInputProvided(map[string]bool{}) {
+		t.Fatalf("server environment should count as explicit server input")
+	}
+}
+
+func TestDiscoverSetupServerHonorsExplicitInputs(t *testing.T) {
+	clearWorkerEnvForTest(t)
+	stubWorkerServerDiscovery(t, "http://192.168.10.66:8080")
+	ctx := context.Background()
+
+	explicit := discoverSetupServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: "http://explicit:8080"}, setupFlowOptions{
+		Visited: map[string]bool{"server-url": true},
+	})
+	if explicit.ServerURL != "http://explicit:8080" {
+		t.Fatalf("explicit setup server should be preserved: %+v", explicit)
+	}
+
+	customBase := discoverSetupServerIfNeeded(ctx, tcworker.JoinOptions{ServerURL: "http://configured:8080"}, setupFlowOptions{
+		Visited: map[string]bool{},
+	})
+	if customBase.ServerURL != "http://configured:8080" {
+		t.Fatalf("configured setup server should be preserved: %+v", customBase)
+	}
+
+	discovered := discoverSetupServerIfNeeded(ctx, tcworker.JoinOptions{}, setupFlowOptions{
+		Visited: map[string]bool{},
+	})
+	if discovered.ServerURL != "http://192.168.10.66:8080" {
+		t.Fatalf("blank setup server should be discovered: %+v", discovered)
+	}
+}
+
+func TestJoinInputHelpersCoverEnvironmentDrivenExplicitness(t *testing.T) {
+	clearWorkerEnvForTest(t)
+	if hasExplicitJoinInput(map[string]bool{}) {
+		t.Fatalf("empty input should not be explicit")
+	}
+	if !hasExplicitJoinInput(map[string]bool{"dry-run": true}) {
+		t.Fatalf("dry-run is an explicit join input")
+	}
+	t.Setenv("TC_WORKER_BACKEND", "claude")
+	if !hasExplicitJoinInput(map[string]bool{}) {
+		t.Fatalf("backend environment should be explicit")
+	}
+}
+
 func TestRunSetupFlowDiscoversServerURL(t *testing.T) {
 	clearWorkerEnvForTest(t)
 	stubWorkerServerDiscovery(t, "http://192.168.10.44:8080")

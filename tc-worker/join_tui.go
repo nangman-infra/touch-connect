@@ -205,7 +205,10 @@ func (m joinWizardTUIModel) resolvedModel() string {
 		if custom != "" {
 			return custom
 		}
-		return m.models[0].Value
+		if fallback := strings.TrimSpace(m.models[0].Value); fallback != "" {
+			return fallback
+		}
+		return m.base.Model
 	}
 	if selected.Value == "" {
 		return m.base.Model
@@ -376,85 +379,6 @@ func (m joinWizardTUIModel) confirmLines(width int) []string {
 	}
 }
 
-func (m joinWizardTUIModel) backendScreen(_ int) string {
-	var builder strings.Builder
-	builder.WriteString(joinStepStyle.Render("STEP 1 - Select AI Engine"))
-	builder.WriteString("\n\nDetected AI CLIs\n")
-	for _, candidate := range m.candidates {
-		marker := " "
-		if candidate.Status != BackendStatusMissing && m.usableIndex(candidate.Backend) == m.selectedWorker {
-			marker = ">"
-		}
-		model := printableModel(candidate.RecommendedModel)
-		if candidate.Status == BackendStatusMissing {
-			builder.WriteString(fmt.Sprintf("  %s %-12s %-12s command=%s\n", marker, candidate.DisplayName, candidate.Status, candidate.Command))
-			continue
-		}
-		builder.WriteString(fmt.Sprintf("  %s %-12s %-12s model=%-12s %s\n", marker, candidate.DisplayName, candidate.Status, model, candidate.CommandPath))
-	}
-	builder.WriteString("\nInstalled engines are execution backends. Role and capabilities are worker contract choices.\n")
-	return builder.String()
-}
-
-func (m joinWizardTUIModel) modelScreen(_ int) string {
-	var builder strings.Builder
-	selected := m.usable[m.selectedWorker]
-	builder.WriteString(joinStepStyle.Render("STEP 2 - Select Model"))
-	builder.WriteString("\n\n")
-	builder.WriteString(fmt.Sprintf("Engine: %s (%s)\n\n", selected.DisplayName, selected.Status))
-	for index, model := range m.models {
-		marker := " "
-		if index == m.selectedModel {
-			marker = ">"
-		}
-		builder.WriteString(fmt.Sprintf("  %s %s\n", marker, model.Label))
-	}
-	if len(m.models) == 0 {
-		builder.WriteString("  default from backend CLI\n")
-	}
-	return builder.String()
-}
-
-func (m joinWizardTUIModel) customModelScreen(_ int) string {
-	return strings.Join([]string{
-		joinStepStyle.Render("STEP 2 - Custom Model"),
-		"",
-		"Enter the model name passed to the selected AI CLI.",
-		"",
-		m.customModel.View(),
-	}, "\n")
-}
-
-func (m joinWizardTUIModel) confirmScreen(_ int) string {
-	selected := m.usable[m.selectedWorker]
-	capabilities := defaultString(m.base.Capabilities, "from selected SKILL.md files")
-	skills := m.base.SkillsDir
-	if len(m.base.SkillPaths) > 0 {
-		skills = strings.Join(m.base.SkillPaths, ",")
-	}
-	if strings.TrimSpace(skills) == "" {
-		skills = "examples/skills"
-	}
-	return strings.Join([]string{
-		joinStepStyle.Render("STEP 3 - Confirm Join"),
-		"",
-		"This worker will join touch-connect with the following contract:",
-		"",
-		fmt.Sprintf("  endpoint      %s", defaultString(m.base.EndpointRef, "tc://endpoint/"+safeJoinPart(selected.Backend)+"_worker")),
-		fmt.Sprintf("  display       %s", defaultString(m.base.DisplayName, selected.DisplayName+" worker")),
-		fmt.Sprintf("  backend       %s", selected.DisplayName),
-		fmt.Sprintf("  model         %s", printableModel(m.resolvedModel())),
-		fmt.Sprintf("  capabilities  %s", capabilities),
-		fmt.Sprintf("  skills        %s", skills),
-		"  permission    non-interactive auto-approve",
-		"",
-		"SECURITY: this worker runs without local permission prompts.",
-		"Only start it inside a trusted workspace and stop it when the handoff is done.",
-		"",
-		"Press enter to start worker.",
-	}, "\n")
-}
-
 func (m joinWizardTUIModel) footer(_ int) string {
 	switch m.screen {
 	case joinWizardScreenBackend:
@@ -493,7 +417,6 @@ var (
 	joinBorderColor = lipgloss.Color("62")
 	joinMutedColor  = lipgloss.Color("245")
 	joinTitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-	joinStepStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
 	joinMutedStyle  = lipgloss.NewStyle().Foreground(joinMutedColor)
 	joinPanelStyle  = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(1, 2)
 	joinPanelTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))

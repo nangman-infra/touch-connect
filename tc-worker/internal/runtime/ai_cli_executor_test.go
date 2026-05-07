@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,8 +13,8 @@ import (
 
 func TestAICLIExecutorExecutesWithPromptOnStdin(t *testing.T) {
 	executor, err := NewAICLIExecutor(AICLIExecutorOptions{
-		Command: "/bin/sh",
-		Args:    []string{"-c", "cat"},
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestAICLIExecutorHelper", "--", "stdin_echo"},
 		Timeout: time.Second,
 	})
 	if err != nil {
@@ -41,8 +43,8 @@ func TestAICLIExecutorExecutesWithPromptOnStdin(t *testing.T) {
 
 func TestAICLIExecutorUsesPromptPlaceholder(t *testing.T) {
 	executor, err := NewAICLIExecutor(AICLIExecutorOptions{
-		Command: "/bin/sh",
-		Args:    []string{"-c", "printf '%s' \"$1\"", "sh", "{{prompt}}"},
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestAICLIExecutorHelper", "--", "arg_echo", "{{prompt}}"},
 		Timeout: time.Second,
 	})
 	if err != nil {
@@ -61,6 +63,33 @@ func TestAICLIExecutorUsesPromptPlaceholder(t *testing.T) {
 	if !strings.Contains(result.Stdout, "Review prompt placeholder") {
 		t.Fatalf("placeholder prompt was not passed in args:\n%s", result.Stdout)
 	}
+}
+
+func TestAICLIExecutorHelper(t *testing.T) {
+	marker := -1
+	for index, arg := range os.Args {
+		if arg == "--" {
+			marker = index
+			break
+		}
+	}
+	if marker < 0 || len(os.Args) <= marker+1 {
+		return
+	}
+
+	switch os.Args[marker+1] {
+	case "stdin_echo":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			os.Exit(2)
+		}
+		_, _ = os.Stdout.Write(data)
+	case "arg_echo":
+		_, _ = os.Stdout.WriteString(strings.Join(os.Args[marker+2:], "\n"))
+	default:
+		return
+	}
+	os.Exit(0)
 }
 
 func TestAICLIExecutorValidationAndFailureResults(t *testing.T) {

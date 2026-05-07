@@ -117,29 +117,129 @@ pipeline {
                                 script: "git cat-file -e ${env.AFTER_SHA}^{commit} >/dev/null 2>&1",
                                 returnStatus: true
                             ) == 0
-                            def diffLabel
-                            def changedFilesText
+                            def pushDiffLabel
+                            def pushChangedFilesText
 
                             if (hasBeforeSha && hasAfterSha) {
-                                diffLabel = "${env.BEFORE_SHA.take(12)}..${env.AFTER_SHA.take(12)}"
-                                changedFilesText = sh(
+                                pushDiffLabel = "${env.BEFORE_SHA.take(12)}..${env.AFTER_SHA.take(12)}"
+                                pushChangedFilesText = sh(
                                     script: "git diff --name-only ${env.BEFORE_SHA} ${env.AFTER_SHA}",
                                     returnStdout: true
                                 ).trim()
                             } else if (sh(script: 'git rev-parse HEAD^ >/dev/null 2>&1', returnStatus: true) == 0) {
-                                diffLabel = 'HEAD^..HEAD'
-                                changedFilesText = sh(
+                                pushDiffLabel = 'HEAD^..HEAD'
+                                pushChangedFilesText = sh(
                                     script: 'git diff --name-only HEAD^ HEAD',
                                     returnStdout: true
                                 ).trim()
                             } else {
-                                diffLabel = 'full-tree'
+                                pushDiffLabel = 'full-tree'
+                                pushChangedFilesText = sh(
+                                    script: 'git ls-tree --name-only -r HEAD',
+                                    returnStdout: true
+                                ).trim()
+                            }
+
+                            def pushChangedFiles = pushChangedFilesText ? pushChangedFilesText.readLines() : []
+                            def deployedRevisionText = ''
+
+                            withCredentials([
+                                usernamePassword(
+                                    credentialsId: env.HARBOR_CREDS_ID,
+                                    usernameVariable: 'HARBOR_USERNAME',
+                                    passwordVariable: 'HARBOR_PASSWORD'
+                                )
+                            ]) {
+                                sh '''
+                                    set -eu
+                                    echo "$HARBOR_PASSWORD" | docker login "$HARBOR_URL" -u "$HARBOR_USERNAME" --password-stdin
+                                '''
+
+                                try {
+                                    deployedRevisionText = sh(
+                                        script: '''
+                                            set -eu
+
+                                            read_image_revision() {
+                                                image="$1"
+                                                revision=$(docker buildx imagetools inspect "$image" \
+                                                    --format '{{range $platform, $image := .Image}}{{index $image.Config.Labels "org.opencontainers.image.revision"}}{{"\n"}}{{end}}' 2>/dev/null \
+                                                    | awk 'NF && $0 != "null" { print; exit }' || true)
+
+                                                if [ -z "$revision" ]; then
+                                                    version=$(docker buildx imagetools inspect "$image" \
+                                                        --format '{{range $platform, $image := .Image}}{{index $image.Config.Labels "org.opencontainers.image.version"}}{{"\n"}}{{end}}' 2>/dev/null \
+                                                        | awk 'NF { print; exit }' || true)
+                                                    case "$version" in
+                                                        sha-*) revision="${version#sha-}" ;;
+                                                        *) revision="" ;;
+                                                    esac
+                                                fi
+
+                                                printf '%s' "$revision"
+                                            }
+
+                                            printf 'server=%s\n' "$(read_image_revision "$SERVER_IMAGE_LATEST")"
+                                            printf 'control=%s\n' "$(read_image_revision "$CONTROL_IMAGE_LATEST")"
+                                        ''',
+                                        returnStdout: true
+                                    ).trim()
+                                } finally {
+                                    sh 'docker logout "$HARBOR_URL"'
+                                }
+                            }
+
+                            def deployedImageRevisions = [:]
+                            deployedRevisionText.readLines().each { line ->
+                                def parts = line.split('=', 2)
+                                if (parts.size() == 2) {
+                                    deployedImageRevisions[parts[0]] = parts[1].trim()
+                                }
+                            }
+                            env.DEPLOYED_SERVER_REVISION = deployedImageRevisions.server ?: ''
+                            env.DEPLOYED_CONTROL_REVISION = deployedImageRevisions.control ?: ''
+
+                            def normalizeRevision = { value ->
+                                def trimmed = value?.trim()
+                                if (!trimmed) {
+                                    return ''
+                                }
+                                return sh(
+                                    script: "git rev-parse --verify --quiet ${trimmed}^{commit} || true",
+                                    returnStdout: true
+                                ).trim()
+                            }
+                            def serverBaseline = normalizeRevision(env.DEPLOYED_SERVER_REVISION)
+                            def controlBaseline = normalizeRevision(env.DEPLOYED_CONTROL_REVISION)
+                            def deploymentBaseline = ''
+
+                            if (serverBaseline && controlBaseline) {
+                                if (serverBaseline == controlBaseline) {
+                                    deploymentBaseline = serverBaseline
+                                } else if (sh(script: "git merge-base --is-ancestor ${serverBaseline} ${controlBaseline}", returnStatus: true) == 0) {
+                                    deploymentBaseline = serverBaseline
+                                } else if (sh(script: "git merge-base --is-ancestor ${controlBaseline} ${serverBaseline}", returnStatus: true) == 0) {
+                                    deploymentBaseline = controlBaseline
+                                }
+                            }
+
+                            def deployDiffLabel
+                            def changedFilesText
+                            if (deploymentBaseline) {
+                                deployDiffLabel = "${deploymentBaseline.take(12)}..${env.SHORT_SHA}"
+                                changedFilesText = sh(
+                                    script: "git diff --name-only ${deploymentBaseline} ${env.FULL_SHA}",
+                                    returnStdout: true
+                                ).trim()
+                            } else {
+                                deployDiffLabel = 'full-tree'
                                 changedFilesText = sh(
                                     script: 'git ls-tree --name-only -r HEAD',
                                     returnStdout: true
                                 ).trim()
                             }
 
+                            env.DEPLOY_BASELINE_REVISION = deploymentBaseline
                             def changedFiles = changedFilesText ? changedFilesText.readLines() : []
                             def deployExactPaths = [
                                 'Dockerfile',
@@ -155,7 +255,7 @@ pipeline {
                                 'tc-control/',
                                 'deploy/onprem/'
                             ]
-                            def serverChanged = diffLabel == 'full-tree' || changedFiles.any { path ->
+                            def serverChanged = deployDiffLabel == 'full-tree' || changedFiles.any { path ->
                                 deployExactPaths.contains(path) || deployPrefixes.any { prefix -> path.startsWith(prefix) }
                             }
                             def forceDeploy = params.FORCE_DEPLOY == true
@@ -180,8 +280,12 @@ pipeline {
 
                             echo "Repository: ${env.REPO_HTTP_URL}"
                             echo "Branch ref: ${env.BUILD_REF}"
-                            echo "Diff scope: ${diffLabel}"
-                            echo "Changed files: ${changedFiles ? changedFiles.join(', ') : '(none)'}"
+                            echo "Push diff scope: ${pushDiffLabel}"
+                            echo "Push changed files: ${pushChangedFiles ? pushChangedFiles.join(', ') : '(none)'}"
+                            echo "Deployed server image revision: ${env.DEPLOYED_SERVER_REVISION ?: '(unknown)'}"
+                            echo "Deployed control image revision: ${env.DEPLOYED_CONTROL_REVISION ?: '(unknown)'}"
+                            echo "Deploy diff scope: ${deployDiffLabel}"
+                            echo "Deploy changed files: ${changedFiles ? changedFiles.join(', ') : '(none)'}"
                             echo "Server image repository: ${env.SERVER_IMAGE_REPO}"
                             echo "Control image repository: ${env.CONTROL_IMAGE_REPO}"
                             echo "Force deploy requested: ${env.FORCE_DEPLOY}"
@@ -622,7 +726,7 @@ def buildAndPushTouchConnectImage(String target, String imageRepo, String imageC
                 "--file Dockerfile",
                 "--target ${target}",
                 "--label org.opencontainers.image.created=${env.BUILD_TIMESTAMP}",
-                "--label org.opencontainers.image.revision=${env.GIT_COMMIT}",
+                "--label org.opencontainers.image.revision=${env.FULL_SHA}",
                 "--label org.opencontainers.image.source=${env.REPO_HTTP_URL}",
                 "--label org.opencontainers.image.version=${imageVersion}",
                 "--pull"

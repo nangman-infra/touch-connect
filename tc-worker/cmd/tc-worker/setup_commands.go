@@ -27,9 +27,11 @@ type setupFlowOptions struct {
 	Base           tcworker.JoinOptions
 	AutoAccept     bool
 	Plain          bool
+	Advanced       bool
 	ConfirmLabel   string
 	NonInteractive bool
 	Help           bool
+	Visited        map[string]bool
 }
 
 func runSetup(ctx context.Context, args []string) error {
@@ -82,10 +84,12 @@ func parseSetupArgs(args []string) (setupFlowOptions, error) {
 	flags.StringVar(&options.Sandbox, "sandbox", getenvDefault("TC_WORKER_SANDBOX", "danger-full-access"), "backend sandbox/profile hint where supported")
 	flags.BoolVar(&parsed.Plain, "plain", false, "disable interactive TUI-style chooser")
 	flags.BoolVar(&parsed.AutoAccept, "yes", false, "accept defaults without prompting")
+	flags.BoolVar(&parsed.Advanced, "advanced", false, "prompt for server, role, capability, permission, and directory fields")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "usage: tc-worker setup [flags]")
 		fmt.Fprintln(flags.Output(), "")
 		fmt.Fprintln(flags.Output(), "creates ~/.touch-connect/worker/config.json and a default local worker SKILL.md")
+		fmt.Fprintln(flags.Output(), "default setup only asks for the AI CLI backend/model; use --advanced to edit every field")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -98,6 +102,7 @@ func parseSetupArgs(args []string) (setupFlowOptions, error) {
 	options.Args = splitArgList(*rawArgs)
 	options.SkillPaths = skillPaths
 	parsed.Base = options
+	parsed.Visited = visitedFlags(flags)
 	parsed.ConfirmLabel = "Save worker config?"
 	parsed.NonInteractive = parsed.AutoAccept || !isInteractiveTerminal()
 	return parsed, nil
@@ -105,19 +110,25 @@ func parseSetupArgs(args []string) (setupFlowOptions, error) {
 
 func runSetupFlow(ctx context.Context, options setupFlowOptions) (tcworker.WorkerConfig, string, error) {
 	base := options.Base
+	base = discoverSetupServerIfNeeded(ctx, base, options)
 	base = applySetupDefaults(base)
 	base, err := chooseSetupBackend(ctx, base, options)
 	if err != nil {
 		return tcworker.WorkerConfig{}, "", err
 	}
-	base, err = promptSetupFields(base, options.NonInteractive)
-	if err != nil {
-		return tcworker.WorkerConfig{}, "", err
+	if options.Advanced {
+		base, err = promptSetupFields(base, options.NonInteractive)
+		if err != nil {
+			return tcworker.WorkerConfig{}, "", err
+		}
 	}
 	return persistWorkerConfig(base, options.ConfigPath)
 }
 
 func chooseSetupBackend(ctx context.Context, base tcworker.JoinOptions, options setupFlowOptions) (tcworker.JoinOptions, error) {
+	if options.NonInteractive && !options.AutoAccept {
+		return base, nil
+	}
 	if !setupNeedsBackendChooser(base, options.NonInteractive) {
 		return base, nil
 	}
@@ -136,7 +147,7 @@ func setupNeedsBackendChooser(base tcworker.JoinOptions, nonInteractive bool) bo
 		return false
 	}
 	backend := strings.TrimSpace(base.Backend)
-	return backend == "" || strings.EqualFold(backend, tcworker.BackendAuto) || !nonInteractive
+	return backend == "" || strings.EqualFold(backend, tcworker.BackendAuto)
 }
 
 func promptSetupFields(base tcworker.JoinOptions, nonInteractive bool) (tcworker.JoinOptions, error) {
@@ -195,7 +206,7 @@ func persistWorkerConfig(base tcworker.JoinOptions, configPath string) (tcworker
 
 func applySetupDefaults(options tcworker.JoinOptions) tcworker.JoinOptions {
 	if strings.TrimSpace(options.ServerURL) == "" {
-		options.ServerURL = "http://127.0.0.1:8080"
+		options.ServerURL = tcworker.DefaultWorkerServerURL
 	}
 	if strings.TrimSpace(options.Backend) == "" {
 		options.Backend = tcworker.BackendAuto
@@ -234,6 +245,16 @@ func applySetupDefaults(options tcworker.JoinOptions) tcworker.JoinOptions {
 		options.Sandbox = "danger-full-access"
 	}
 	return options
+}
+
+func discoverSetupServerIfNeeded(ctx context.Context, base tcworker.JoinOptions, options setupFlowOptions) tcworker.JoinOptions {
+	if workerServerInputProvided(options.Visited) || strings.TrimSpace(base.ServerURL) != "" {
+		return base
+	}
+	if url, _ := discoverWorkerServerURL(ctx, tcworker.ServerDiscoveryOptions{}); url != "" {
+		base.ServerURL = url
+	}
+	return base
 }
 
 func defaultWorkDir() string {

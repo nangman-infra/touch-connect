@@ -94,7 +94,9 @@ Local AI CLI workers remain host-side by default because Codex, Claude Code, Gem
 make worker
 ```
 
-It opens the worker TUI, detects installed AI CLIs, marks what is ready or missing, lets the user choose the backend/model, then starts `tc-worker join`. After join, the same TUI becomes the worker cockpit: a responsive `Work` surface with `Body`, `Readback`, `Result`, `Artifacts`, and `Log` tabs, a compact context rail, recent activity, and help overlay. For Claude Max users, the default selection is Claude Code with `opus[1m]`.
+It opens one worker onboarding surface: it probes `tc-server` on localhost and the local LAN through `/healthz`, detects installed AI CLIs, marks what is ready or missing, lets the user choose the backend/model, then starts `tc-worker join`. After join, the same TUI becomes the worker cockpit: a responsive `Work` surface with `Body`, `Readback`, `Result`, `Artifacts`, and `Log` tabs, a compact context rail, recent activity, and help overlay. For Claude Max users, the default selection is Claude Code with `opus[1m]`.
+
+`make worker` does not require a separate setup step. The installed command has the same primary surface: `tc-worker join` discovers the server, creates local worker state under `~/.touch-connect/worker/` on first run when no saved config exists, and later runs load that config and go straight to join. Server discovery first consumes the `tc-server` mDNS/Bonjour service (`_touch-connect._tcp.local.`), then falls back to localhost and LAN `/healthz` probes. Use `tc-worker setup --advanced` only when you want to pre-edit the saved server, role, capability, permission, and directory fields.
 
 Use plain text mode when testing scripts or debugging a terminal issue:
 
@@ -139,14 +141,22 @@ cd /absolute/path/to/touch-connect
 make worker
 ```
 
-The wizard shows installed backends first:
+The join surface shows connection, backend, and worker contract together:
 
 ```text
-Detected AI CLIs:
-  1. Claude       ready        model=opus[1m] path=/opt/homebrew/bin/claude
-  2. Codex        auth_unknown model=default path=/opt/homebrew/bin/codex
-  3. Gemini       missing      command=gemini
-  4. Kiro         missing      command=kiro-cli
+Connection
+  server  http://127.0.0.1:8080
+  probe   /healthz
+
+AI Engine
+  > Claude  ready opus[1m]
+    Codex   auth_unknown default
+    Gemini  missing
+
+Worker Contract
+  role     code-worker
+  caps     code.change,ai.review
+  perm     auto-approve
 ```
 
 After selection, the worker stays in the foreground and waits. It should not run `tcctl message send`, `tcctl task watch`, or `tcctl task history` to verify itself. Those commands belong to the manager terminal.

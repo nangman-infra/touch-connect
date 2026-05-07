@@ -11,6 +11,9 @@ func TestFromEnvSQLite(t *testing.T) {
 	t.Setenv("TC_SERVER_SQLITE_PATH", "/tmp/touch-connect.db")
 	t.Setenv("TC_SERVER_VERSION", "test-version")
 	t.Setenv("TC_SERVER_MIN_WORKER_VERSION", "0.2.0")
+	t.Setenv("TC_SERVER_DISCOVERY", "false")
+	t.Setenv("TC_SERVER_DISCOVERY_NAME", "tc-test")
+	t.Setenv("TC_SERVER_ADVERTISE_URL", "http://192.168.10.34:8080")
 	t.Setenv("TC_SERVER_ENDPOINT_HEARTBEAT_TIMEOUT", "10s")
 	t.Setenv("TC_SERVER_ATTEMPT_LEASE_DURATION", "7s")
 	t.Setenv("TC_SERVER_MAX_REDELIVERY", "9")
@@ -21,6 +24,9 @@ func TestFromEnvSQLite(t *testing.T) {
 	}
 	if cfg.BindAddr != "0.0.0.0:9090" || cfg.Storage != "sqlite" || cfg.SQLitePath != "/tmp/touch-connect.db" {
 		t.Fatalf("unexpected storage config: %+v", cfg)
+	}
+	if cfg.DiscoveryEnabled || cfg.DiscoveryName != "tc-test" || cfg.AdvertiseURL != "http://192.168.10.34:8080" {
+		t.Fatalf("unexpected discovery config: %+v", cfg)
 	}
 	if cfg.Settings.Version != "test-version" || cfg.Settings.MinimumWorkerVersion != "0.2.0" {
 		t.Fatalf("unexpected version settings: %+v", cfg.Settings)

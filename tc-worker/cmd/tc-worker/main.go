@@ -26,6 +26,8 @@ const (
 	flagSkillsDir   = "skills-dir"
 )
 
+var discoverWorkerServerURL = tcworker.DiscoverWorkerServerURL
+
 type rootCommand func(context.Context, []string) error
 
 func main() {
@@ -197,10 +199,12 @@ func parseJoinArgs(args []string) (joinRunOptions, error) {
 		fmt.Fprintln(flags.Output(), "usage: tc-worker join [flags]")
 		fmt.Fprintln(flags.Output(), "")
 		fmt.Fprintln(flags.Output(), "normal path:")
-		fmt.Fprintln(flags.Output(), "  tc-worker setup")
 		fmt.Fprintln(flags.Output(), "  tc-worker join")
 		fmt.Fprintln(flags.Output(), "")
-		fmt.Fprintln(flags.Output(), "if no config exists and the terminal is interactive, join runs setup once before starting")
+		fmt.Fprintln(flags.Output(), "first run:")
+		fmt.Fprintln(flags.Output(), "  discovers tc-server through mDNS, localhost, or LAN; detects an AI CLI; creates local state; starts")
+		fmt.Fprintln(flags.Output(), "")
+		fmt.Fprintln(flags.Output(), "use tc-worker setup only when you want to pre-write or edit the saved worker config")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -263,6 +267,7 @@ func resolveJoinOptions(ctx context.Context, parsed joinRunOptions) (tcworker.Jo
 			Plain:          parsed.Plain,
 			ConfirmLabel:   "Save worker config?",
 			NonInteractive: parsed.Yes || !isInteractiveTerminal(),
+			Visited:        parsed.Visited,
 		})
 		if err != nil {
 			return tcworker.JoinOptions{}, err
@@ -280,19 +285,19 @@ func resolveJoinOptions(ctx context.Context, parsed joinRunOptions) (tcworker.Jo
 		if err != nil {
 			return tcworker.JoinOptions{}, err
 		}
-	case !configExists && !parsed.Wizard && !hasExplicitJoinInput(parsed.Visited):
-		return tcworker.JoinOptions{}, fmt.Errorf("worker config not found; run tc-worker setup or pass explicit join flags")
 	default:
 		base = parsed.Options
 	}
-	return applyJoinFlagOverrides(base, parsed.Options, parsed.Visited), nil
+	base = applyJoinFlagOverrides(base, parsed.Options, parsed.Visited)
+	base = discoverJoinServerIfNeeded(ctx, base, parsed, configExists)
+	return base, nil
 }
 
 func shouldSetupBeforeJoin(parsed joinRunOptions, configExists bool) bool {
 	if parsed.Setup && !configExists {
 		return true
 	}
-	return !parsed.Wizard && !configExists && !hasExplicitJoinInput(parsed.Visited) && isInteractiveTerminal()
+	return !parsed.Wizard && !configExists && !hasExplicitJoinInput(parsed.Visited)
 }
 
 func hasExplicitJoinInput(visited map[string]bool) bool {
@@ -378,6 +383,26 @@ func anyVisited(visited map[string]bool, names ...string) bool {
 		}
 	}
 	return false
+}
+
+func discoverJoinServerIfNeeded(ctx context.Context, base tcworker.JoinOptions, parsed joinRunOptions, configExists bool) tcworker.JoinOptions {
+	if workerServerInputProvided(parsed.Visited) {
+		return base
+	}
+	if configExists && !shouldSetupBeforeJoin(parsed, configExists) {
+		return base
+	}
+	if strings.TrimSpace(base.ServerURL) != "" && base.ServerURL != tcworker.DefaultWorkerServerURL {
+		return base
+	}
+	if url, _ := discoverWorkerServerURL(ctx, tcworker.ServerDiscoveryOptions{}); url != "" {
+		base.ServerURL = url
+	}
+	return base
+}
+
+func workerServerInputProvided(visited map[string]bool) bool {
+	return anyVisited(visited, flagServerURL, "server") || strings.TrimSpace(os.Getenv("TC_WORKER_SERVER_URL")) != ""
 }
 
 type repeatedFlag []string
@@ -467,8 +492,8 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "normal worker lifecycle:")
 	fmt.Fprintln(w, "  tc-worker install        install the latest released tc-worker binary")
-	fmt.Fprintln(w, "  tc-worker setup          create ~/.touch-connect/worker/config.json")
-	fmt.Fprintln(w, "  tc-worker join           start the configured local AI worker")
+	fmt.Fprintln(w, "  tc-worker join           discover server, choose AI CLI/model, and start the worker")
+	fmt.Fprintln(w, "  tc-worker setup          advanced: pre-write or edit ~/.touch-connect/worker/config.json")
 	fmt.Fprintln(w, "  tc-worker update         update the installed tc-worker binary")
 	fmt.Fprintln(w, "  tc-worker uninstall      remove the installed tc-worker binary")
 	fmt.Fprintln(w, "")

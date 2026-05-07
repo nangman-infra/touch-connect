@@ -42,3 +42,26 @@ tc-server -storage sqlite -sqlite-path /absolute/path/to/touch-connect.sqlite
 ```
 
 The same settings are available through `TC_SERVER_BIND_ADDR`, `TC_SERVER_STORAGE`, and `TC_SERVER_SQLITE_PATH`.
+
+## Local Discovery
+
+`tc-server` advertises itself on the local network with mDNS/Bonjour by default:
+
+```text
+service  _touch-connect._tcp.local.
+txt      component=tc-server, version=<server-version>, url=<optional reachable URL>
+```
+
+Worker join uses this advertisement before falling back to localhost and LAN `/healthz` probes.
+
+Useful flags and environment variables:
+
+```text
+tc-server -discovery=false
+tc-server -discovery-name touch-connect-office
+tc-server -advertise-url http://192.168.10.34:8080
+
+TC_SERVER_DISCOVERY=false
+TC_SERVER_DISCOVERY_NAME=touch-connect-office
+TC_SERVER_ADVERTISE_URL=http://192.168.10.34:8080
+```

@@ -156,6 +156,7 @@ func TestJoinSetupBranchAndStartPlainError(t *testing.T) {
 		Yes:        true,
 		Visited:    map[string]bool{},
 		Options: tcworker.JoinOptions{
+			ServerURL:    tcworker.DefaultWorkerServerURL,
 			Backend:      tcworker.BackendClaude,
 			Command:      "/bin/echo",
 			SkillsDir:    filepath.Join(dir, "skills"),
@@ -314,6 +315,9 @@ func TestSetupDefaultsPromptsAndPathHelpers(t *testing.T) {
 	if !setupNeedsBackendChooser(tcworker.JoinOptions{}, false) {
 		t.Fatalf("expected empty setup to need backend chooser")
 	}
+	if setupNeedsBackendChooser(tcworker.JoinOptions{Backend: tcworker.BackendClaude}, false) {
+		t.Fatalf("explicit backend should skip backend chooser")
+	}
 	if setupNeedsBackendChooser(tcworker.JoinOptions{Command: "/bin/echo"}, false) {
 		t.Fatalf("command override should skip backend chooser")
 	}
@@ -406,17 +410,67 @@ func TestResolveJoinOptionsLoadsConfigAndAppliesOverrides(t *testing.T) {
 	}
 }
 
-func TestResolveJoinOptionsRequiresConfigOrExplicitFlags(t *testing.T) {
+func TestResolveJoinOptionsInitializesDefaultConfigWhenMissing(t *testing.T) {
 	clearWorkerEnvForTest(t)
+	stubWorkerServerDiscovery(t, "http://192.168.10.34:8080")
 
-	_, err := resolveJoinOptions(context.Background(), joinRunOptions{
-		ConfigPath: filepath.Join(t.TempDir(), "missing.json"),
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	skillsDir := filepath.Join(dir, "skills")
+	options, err := resolveJoinOptions(context.Background(), joinRunOptions{
+		ConfigPath: configPath,
 		Plain:      true,
-		Yes:        true,
 		Visited:    map[string]bool{},
+		Options: tcworker.JoinOptions{
+			Backend:     tcworker.BackendClaude,
+			Command:     "/bin/echo",
+			SkillsDir:   skillsDir,
+			WorkDir:     dir,
+			ArtifactDir: filepath.Join(dir, "artifacts"),
+		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "worker config not found") {
-		t.Fatalf("expected missing config error, got %v", err)
+	if err != nil {
+		t.Fatalf("resolve join options: %v", err)
+	}
+	if options.Backend != tcworker.BackendClaude || options.Command != "/bin/echo" || options.Role != tcworker.DefaultWorkerRole {
+		t.Fatalf("unexpected initialized join options: %+v", options)
+	}
+	if options.ServerURL != "http://192.168.10.34:8080" {
+		t.Fatalf("expected discovered server URL, got %+v", options)
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("expected missing config to be created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "local-ai-worker", "SKILL.md")); err != nil {
+		t.Fatalf("expected default worker skill to be created: %v", err)
+	}
+}
+
+func TestRunSetupFlowDiscoversServerURL(t *testing.T) {
+	clearWorkerEnvForTest(t)
+	stubWorkerServerDiscovery(t, "http://192.168.10.44:8080")
+
+	dir := t.TempDir()
+	config, _, err := runSetupFlow(context.Background(), setupFlowOptions{
+		ConfigPath: filepath.Join(dir, "config.json"),
+		Base: tcworker.JoinOptions{
+			Backend:      tcworker.BackendClaude,
+			Command:      "/bin/echo",
+			SkillsDir:    filepath.Join(dir, "skills"),
+			WorkDir:      dir,
+			ArtifactDir:  filepath.Join(dir, "artifacts"),
+			Capabilities: "code.change",
+			Permission:   tcworker.DefaultWorkerPermission,
+		},
+		AutoAccept:     true,
+		NonInteractive: true,
+		Visited:        map[string]bool{},
+	})
+	if err != nil {
+		t.Fatalf("setup flow with discovery: %v", err)
+	}
+	if config.ServerURL != "http://192.168.10.44:8080" {
+		t.Fatalf("expected discovered server URL in config, got %+v", config)
 	}
 }
 
@@ -500,4 +554,18 @@ func clearWorkerEnvForTest(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 	}
+}
+
+func stubWorkerServerDiscovery(t *testing.T, url string) {
+	t.Helper()
+	original := discoverWorkerServerURL
+	discoverWorkerServerURL = func(context.Context, tcworker.ServerDiscoveryOptions) (string, []tcworker.ServerCandidate) {
+		if url == "" {
+			return "", nil
+		}
+		return url, []tcworker.ServerCandidate{{URL: url, Source: "test", Status: "ok", Component: "tc-server"}}
+	}
+	t.Cleanup(func() {
+		discoverWorkerServerURL = original
+	})
 }

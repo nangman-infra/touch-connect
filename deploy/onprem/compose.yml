@@ -35,6 +35,8 @@ services:
       TC_SERVER_BIND_ADDR: 0.0.0.0:8080
       TC_SERVER_STORAGE: sqlite
       TC_SERVER_SQLITE_PATH: /data/touch-connect.db
+      TC_SERVER_DISCOVERY_NAME: touch-connect-onprem
+      TC_SERVER_ADVERTISE_URL: http://${TOUCH_CONNECT_HOST:-172.16.0.34}:8080
     ports:
       - "8080:8080"
     volumes:

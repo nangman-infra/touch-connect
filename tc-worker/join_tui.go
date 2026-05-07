@@ -62,7 +62,7 @@ func runJoinWizardTUI(ctx context.Context, options JoinWizardOptions, candidates
 		fmt.Fprintf(output, "  backend:    %s\n", selected.DisplayName)
 		fmt.Fprintf(output, "  model:      %s\n", printableModel(result.Model))
 		fmt.Fprintf(output, "  command:    %s\n", result.Command)
-		fmt.Fprintf(output, "  server:     %s\n", defaultString(result.ServerURL, "http://127.0.0.1:8080"))
+		fmt.Fprintf(output, "  server:     %s\n", defaultString(result.ServerURL, DefaultWorkerServerURL))
 		fmt.Fprintln(output, "  permission: non-interactive auto-approve")
 	}
 	return result, nil
@@ -229,23 +229,150 @@ func (m joinWizardTUIModel) header(width int) string {
 		selected = m.usable[m.selectedWorker]
 	}
 	left := joinTitleStyle.Render("touch-connect worker")
-	right := joinMutedStyle.Render("server " + defaultString(m.base.ServerURL, "http://127.0.0.1:8080"))
+	right := joinMutedStyle.Render("server " + defaultString(m.base.ServerURL, DefaultWorkerServerURL))
 	line := left + strings.Repeat(" ", maxInt(1, width-lipgloss.Width(left)-lipgloss.Width(right)-6)) + right
 	return line + "\n" + joinMutedStyle.Render("engine "+selected.DisplayName+" / status "+selected.Status+" / mode local AI worker join")
 }
 
 func (m joinWizardTUIModel) body(width int) string {
+	connection := m.connectionPanel(width)
+	engine := m.enginePanel(width)
+	contract := m.contractPanel(width)
+	active := m.activeOnboardingPanel(width)
+	if width < 96 {
+		return lipgloss.JoinVertical(lipgloss.Left, connection, engine, contract, active)
+	}
+	gap := "  "
+	panelWidth := maxInt(24, (width-2-lipgloss.Width(gap)*2)/3)
+	row := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.connectionPanel(panelWidth),
+		gap,
+		m.enginePanel(panelWidth),
+		gap,
+		m.contractPanel(panelWidth),
+	)
+	return lipgloss.JoinVertical(lipgloss.Left, row, active)
+}
+
+func (m joinWizardTUIModel) connectionPanel(width int) string {
+	serverURL := defaultString(m.base.ServerURL, DefaultWorkerServerURL)
+	source := "loopback/default"
+	if serverURL != DefaultWorkerServerURL {
+		source = "auto-discovered or configured"
+	}
+	return renderJoinPanel("Connection", width, []string{
+		"server  " + compact(serverURL, maxInt(16, width-14)),
+		"probe   /healthz",
+		"source  " + compact(source, maxInt(16, width-14)),
+	})
+}
+
+func (m joinWizardTUIModel) enginePanel(width int) string {
+	lines := []string{"installed AI CLIs"}
+	for _, candidate := range m.candidates {
+		marker := " "
+		if candidate.Status != BackendStatusMissing && m.usableIndex(candidate.Backend) == m.selectedWorker {
+			marker = ">"
+		}
+		model := printableModel(candidate.RecommendedModel)
+		state := candidate.Status
+		if candidate.Status == BackendStatusMissing {
+			lines = append(lines, fmt.Sprintf("%s %-8s %s", marker, candidate.DisplayName, state))
+			continue
+		}
+		lines = append(lines, compact(fmt.Sprintf("%s %-8s %s %s", marker, candidate.DisplayName, state, model), maxInt(16, width-6)))
+	}
+	return renderJoinPanel("AI Engine", width, lines)
+}
+
+func (m joinWizardTUIModel) contractPanel(width int) string {
+	selected := BackendCandidate{Backend: "ai", DisplayName: "AI"}
+	if len(m.usable) > 0 {
+		selected = m.usable[m.selectedWorker]
+	}
+	endpoint := defaultString(m.base.EndpointRef, "tc://endpoint/"+safeJoinPart(selected.Backend)+"_worker")
+	capabilities := defaultString(m.base.Capabilities, "from SKILL.md")
+	role := defaultString(m.base.Role, DefaultWorkerRole)
+	return renderJoinPanel("Worker Contract", width, []string{
+		"endpoint " + compact(endpoint, maxInt(16, width-12)),
+		"role     " + compact(role, maxInt(16, width-12)),
+		"caps     " + compact(capabilities, maxInt(16, width-12)),
+		"perm     auto-approve",
+	})
+}
+
+func (m joinWizardTUIModel) activeOnboardingPanel(width int) string {
 	switch m.screen {
 	case joinWizardScreenBackend:
-		return m.backendScreen(width)
+		return renderJoinPanel("Choose Engine", width, []string{
+			"Pick the local AI CLI that will receive touch-connect tasks.",
+			"Use the AI Engine panel for installed/auth status.",
+			"",
+			"Current: " + m.selectedBackendSummary(),
+		})
 	case joinWizardScreenModel:
-		return m.modelScreen(width)
+		return renderJoinPanel("Choose Model", width, m.modelChoiceLines(width))
 	case joinWizardScreenCustomModel:
-		return m.customModelScreen(width)
+		return renderJoinPanel("Custom Model", width, []string{
+			"Enter the model name passed to the selected AI CLI.",
+			"",
+			m.customModel.View(),
+		})
 	case joinWizardScreenConfirm:
-		return m.confirmScreen(width)
+		return renderJoinPanel("Start Worker", width, m.confirmLines(width))
 	default:
 		return ""
+	}
+}
+
+func (m joinWizardTUIModel) selectedBackendSummary() string {
+	if len(m.usable) == 0 {
+		return "none"
+	}
+	selected := m.usable[m.selectedWorker]
+	return selected.DisplayName + " (" + selected.Status + ")"
+}
+
+func (m joinWizardTUIModel) modelChoiceLines(width int) []string {
+	if len(m.usable) == 0 {
+		return []string{"No AI CLI backend is available."}
+	}
+	selected := m.usable[m.selectedWorker]
+	lines := []string{"Engine: " + selected.DisplayName}
+	if len(m.models) == 0 {
+		return append(lines, "Model: default from backend CLI")
+	}
+	for index, model := range m.models {
+		marker := " "
+		if index == m.selectedModel {
+			marker = ">"
+		}
+		lines = append(lines, compact(fmt.Sprintf("%s %s", marker, model.Label), maxInt(16, width-6)))
+	}
+	return lines
+}
+
+func (m joinWizardTUIModel) confirmLines(width int) []string {
+	selected := m.usable[m.selectedWorker]
+	capabilities := defaultString(m.base.Capabilities, "from selected SKILL.md files")
+	skills := m.base.SkillsDir
+	if len(m.base.SkillPaths) > 0 {
+		skills = strings.Join(m.base.SkillPaths, ",")
+	}
+	if strings.TrimSpace(skills) == "" {
+		skills = "examples/skills"
+	}
+	return []string{
+		"Ready to join as " + selected.DisplayName + " worker.",
+		"",
+		"model       " + compact(printableModel(m.resolvedModel()), maxInt(16, width-14)),
+		"skills      " + compact(skills, maxInt(16, width-14)),
+		"capability  " + compact(capabilities, maxInt(16, width-14)),
+		"",
+		"Security: this worker runs without local permission prompts.",
+		"Only start it inside a trusted workspace.",
+		"",
+		"Press enter to start worker.",
 	}
 }
 
@@ -368,6 +495,8 @@ var (
 	joinTitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
 	joinStepStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
 	joinMutedStyle  = lipgloss.NewStyle().Foreground(joinMutedColor)
+	joinPanelStyle  = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(1, 2)
+	joinPanelTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
 )
 
 func joinBoxStyle(width int) lipgloss.Style {
@@ -376,6 +505,13 @@ func joinBoxStyle(width int) lipgloss.Style {
 		BorderForeground(joinBorderColor).
 		Padding(1, 2).
 		Width(maxInt(40, width-2))
+}
+
+func renderJoinPanel(title string, width int, lines []string) string {
+	body := append([]string{joinPanelTitle.Render(title), ""}, lines...)
+	return joinPanelStyle.
+		Width(maxInt(24, width-6)).
+		Render(strings.Join(body, "\n"))
 }
 
 func maxInt(left int, right int) int {

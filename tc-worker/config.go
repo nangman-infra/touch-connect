@@ -264,7 +264,7 @@ func defaultWorkerConfigScalars(c WorkerConfig) WorkerConfig {
 		c.Version = WorkerConfigVersion
 	}
 	if strings.TrimSpace(c.ServerURL) == "" {
-		c.ServerURL = "http://127.0.0.1:8080"
+		c.ServerURL = DefaultWorkerServerURL
 	}
 	c.Backend = strings.ToLower(strings.TrimSpace(c.Backend))
 	if c.Backend == "" {

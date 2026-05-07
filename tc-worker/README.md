@@ -19,19 +19,21 @@ curl -fsSL https://raw.githubusercontent.com/nangman-infra/touch-connect/main/sc
   | VERSION=worker-v0.1.0-alpha.2 sh
 ```
 
-Then configure once:
-
-```sh
-tc-worker setup
-```
-
-Start the worker:
+Then start the worker:
 
 ```sh
 tc-worker join
 ```
 
-The setup command writes:
+`tc-worker join` is the primary product surface. On first run it browses for the `tc-server` mDNS/Bonjour service (`_touch-connect._tcp.local.`), then probes localhost and the local LAN for a healthy `tc-server` `/healthz`, detects an installed AI CLI, creates local worker state, and starts the worker cockpit. After that it loads the saved config and joins directly.
+
+Optional: pre-write or edit the saved config:
+
+```sh
+tc-worker setup --advanced
+```
+
+The local worker state uses:
 
 ```text
 ~/.touch-connect/worker/config.json
@@ -39,14 +41,14 @@ The setup command writes:
 ~/.touch-connect/worker/artifacts/
 ```
 
-`tc-worker join` loads that config. If the config is missing and the terminal is interactive, `join` runs setup once and then starts the worker.
+`tc-worker setup` is for advanced configuration. The normal path is still just `tc-worker join`.
 
 ## Installed Command Surface
 
 ```text
 tc-worker install       install the latest released worker binary
-tc-worker setup         create or refresh local worker config
-tc-worker join          start the configured worker cockpit
+tc-worker join          discover server, choose AI CLI/model, and start the worker
+tc-worker setup         advanced: create or refresh local worker config
 tc-worker doctor        inspect config and installed AI CLIs
 tc-worker update        update the installed worker binary
 tc-worker uninstall     remove the installed worker binary
@@ -80,7 +82,7 @@ The worker does not wait for chat input after it starts. It registers with `tc-s
 Default setup values:
 
 ```text
-server      http://127.0.0.1:8080
+server      auto-detected from localhost or the local LAN; fallback http://127.0.0.1:8080
 role        code-worker
 capability  code.change,ai.review
 permission  auto-approve

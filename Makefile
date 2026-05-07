@@ -76,7 +76,7 @@ smoke:
 	$(COMPOSE) run --rm tcctl message send --capability code.change --summary "compose smoke" --body "Verify compose echo worker can receive and complete a message." --quality-gate=skip
 
 worker:
-	go run ./tc-worker/cmd/tc-worker join --setup --skills-dir $(CURDIR)/examples/skills
+	go run ./tc-worker/cmd/tc-worker join --skills-dir $(CURDIR)/examples/skills
 
 host-codex-worker:
 	go run ./tc-worker/cmd/tc-worker join --backend codex --model gpt-5.4-mini --skills-dir $(CURDIR)/examples/skills --endpoint-ref tc://endpoint/host_codex_worker --permission auto-approve

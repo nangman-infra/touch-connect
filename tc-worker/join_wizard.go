@@ -95,7 +95,7 @@ func runTextJoinWizard(options JoinWizardOptions, candidates []BackendCandidate,
 	fmt.Fprintf(output, "  backend:    %s\n", selected.DisplayName)
 	fmt.Fprintf(output, "  model:      %s\n", printableModel(model))
 	fmt.Fprintf(output, "  command:    %s\n", result.Command)
-	fmt.Fprintf(output, "  server:     %s\n", defaultString(result.ServerURL, "http://127.0.0.1:8080"))
+	fmt.Fprintf(output, "  server:     %s\n", defaultString(result.ServerURL, DefaultWorkerServerURL))
 	fmt.Fprintf(output, "  permission: %s\n", defaultString(result.Permission, DefaultWorkerPermission))
 	if err := confirmJoinWizard(reader, output, options); err != nil {
 		return JoinOptions{}, err

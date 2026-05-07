@@ -11,10 +11,13 @@ import (
 )
 
 type Config struct {
-	BindAddr   string
-	Storage    string
-	SQLitePath string
-	Settings   application.Settings
+	BindAddr         string
+	Storage          string
+	SQLitePath       string
+	DiscoveryEnabled bool
+	DiscoveryName    string
+	AdvertiseURL     string
+	Settings         application.Settings
 }
 
 func FromEnv() (Config, error) {
@@ -24,6 +27,9 @@ func FromEnv() (Config, error) {
 		Storage:  getenv("TC_SERVER_STORAGE", "memory"),
 		Settings: settings,
 	}
+	cfg.DiscoveryEnabled = boolFromEnv("TC_SERVER_DISCOVERY", true)
+	cfg.DiscoveryName = getenv("TC_SERVER_DISCOVERY_NAME", "")
+	cfg.AdvertiseURL = os.Getenv("TC_SERVER_ADVERTISE_URL")
 	cfg.SQLitePath = os.Getenv("TC_SERVER_SQLITE_PATH")
 	cfg.Settings.Version = getenv("TC_SERVER_VERSION", settings.Version)
 	cfg.Settings.MinimumWorkerVersion = getenv("TC_SERVER_MIN_WORKER_VERSION", settings.MinimumWorkerVersion)
@@ -55,6 +61,9 @@ func (c Config) Validated() (Config, error) {
 	if c.BindAddr == "" {
 		return Config{}, errors.New("TC_SERVER_BIND_ADDR must not be empty")
 	}
+	if c.DiscoveryName == "" {
+		c.DiscoveryName = "touch-connect"
+	}
 	switch c.Storage {
 	case "memory":
 	case "sqlite":
@@ -78,4 +87,16 @@ func getenv(key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func boolFromEnv(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

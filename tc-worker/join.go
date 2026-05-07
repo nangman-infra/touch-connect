@@ -136,7 +136,7 @@ func (o JoinOptions) withDefaults() (JoinOptions, error) {
 
 func (o JoinOptions) defaultServerAndBackend() (JoinOptions, error) {
 	if strings.TrimSpace(o.ServerURL) == "" {
-		o.ServerURL = "http://127.0.0.1:8080"
+		o.ServerURL = DefaultWorkerServerURL
 	}
 	if err := validateWorkerServerURL(o.ServerURL); err != nil {
 		return JoinOptions{}, err

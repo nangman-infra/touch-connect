@@ -24,6 +24,9 @@ must be writable by that UID so SQLite can create `/data/touch-connect.db`.
 
 Set `WATCHTOWER_HTTP_API_TOKEN` in `.env` to the same secret stored in Jenkins credential
 `nangman-infra-touch-connect-watchtower-token`.
+Set `TOUCH_CONNECT_HOST` to the LAN address workers should use for auto-discovery.
+The default is `172.16.0.34`, and `tc-server` publishes it through mDNS/Bonjour
+as `_touch-connect._tcp.local.`.
 
 ```sh
 docker compose --env-file .env -f compose.yml pull

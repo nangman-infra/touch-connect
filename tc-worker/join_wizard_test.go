@@ -138,6 +138,40 @@ func TestRunJoinWizardCanCancelAndUseFallbackModel(t *testing.T) {
 	}
 }
 
+func TestJoinWizardTUIUsesUnifiedOnboardingSurface(t *testing.T) {
+	candidates := []BackendCandidate{
+		{
+			Backend:          BackendClaude,
+			DisplayName:      "Claude",
+			CommandPath:      "/mock/bin/claude",
+			Status:           BackendStatusReady,
+			RecommendedModel: "opus[1m]",
+		},
+		{
+			Backend:          BackendCodex,
+			DisplayName:      "Codex",
+			CommandPath:      "/mock/bin/codex",
+			Status:           BackendStatusAuthUnknown,
+			RecommendedModel: "gpt-5.4-mini",
+		},
+	}
+	model := newJoinWizardTUIModel(JoinOptions{
+		ServerURL:    "http://192.168.10.34:8080",
+		Role:         DefaultWorkerRole,
+		Capabilities: "code.change,ai.review",
+	}, candidates, usableBackendCandidates(candidates))
+	model.width = 120
+	view := model.View()
+	for _, want := range []string{"Connection", "AI Engine", "Worker Contract", "Choose Engine", "http://192.168.10.34:8080"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected unified TUI view to contain %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "STEP 1") || strings.Contains(view, "STEP 2") {
+		t.Fatalf("old stepped wizard labels should not be the primary TUI surface:\n%s", view)
+	}
+}
+
 func assertCandidate(t *testing.T, candidate BackendCandidate, backend string, status string, path string) {
 	t.Helper()
 	if candidate.Backend != backend || candidate.Status != status || candidate.CommandPath != path {
